@@ -19,7 +19,10 @@ class PlannerOutput(BaseModel):
     subtasks: List[str] = Field(
         description="A list of 1 to 3 distinct sub-queries or tasks required to answer the user's question completely."
     )
-
+class RelevanceScore(BaseModel):
+    binary_score: str = Field(
+        description="Grade whether retrieved evidence is relevant to the user question. 'yes' or 'no'."
+    )
 
 # ==========================================
 # Graph Nodes
@@ -181,3 +184,70 @@ def simple_qa_node(state: AgentState) -> dict:
     llm = get_fast_llm()
     response = llm.invoke(f"Respond politely and concisely to the user: {question}")
     return {"generation": response.content, "citations": []}
+
+
+# Add this import at the top of app/graph/nodes.py if not already present
+from pydantic import BaseModel, Field
+
+# ==========================================
+# Reflection Schemas & Nodes
+# ==========================================
+
+class RelevanceScore(BaseModel):
+    binary_score: str = Field(
+        description="Grade whether retrieved evidence is relevant to the user question. 'yes' or 'no'."
+    )
+
+def evaluator_node(state: AgentState) -> dict:
+    """Grades whether the top ranked evidence is relevant to the question."""
+    print("\n--- [NODE] Relevance Evaluator ---")
+    question = state.get("question", "")
+    ranked_evidence = state.get("ranked_evidence", [])
+    retry_count = state.get("retry_count") or 0
+
+    if not ranked_evidence:
+        print("-> No evidence retrieved. Grading as 'no'.")
+        return {"is_relevant": False, "retry_count": retry_count + 1}
+
+    llm = get_fast_llm()
+    structured_llm = llm.with_structured_output(RelevanceScore)
+
+    context_sample = "\n---\n".join([item["content"] for item in ranked_evidence[:3]])
+    prompt = (
+        "You are an expert grader evaluating whether retrieved documents contain relevant information "
+        "to answer a user question.\n\n"
+        f"User Question: {question}\n\n"
+        f"Retrieved Evidence Sample:\n{context_sample}\n\n"
+        "Does the evidence contain information directly relevant to answering the question? "
+        "Grade with 'yes' or 'no'."
+    )
+
+    result: RelevanceScore = structured_llm.invoke(prompt)
+    is_relevant = result.binary_score.lower().strip() == "yes"
+
+    print(f"-> Evidence Grade: '{result.binary_score.upper()}' | Relevancy: {is_relevant}")
+    return {"is_relevant": is_relevant, "retry_count": retry_count + 1}
+
+
+def query_rewriter_node(state: AgentState) -> dict:
+    """Reformulates the query to improve vector retrieval on second attempt."""
+    print("\n--- [NODE] Query Rewriter ---")
+    question = state.get("question", "")
+    retry_count = state.get("retry_count", 1)
+
+    llm = get_fast_llm()
+    prompt = (
+        f"The initial retrieval attempt for the user question below failed to find relevant documents:\n"
+        f"Question: '{question}'\n\n"
+        "Rewrite this query to be more specific, search-optimized, and rich in domain keywords "
+        "for vector database search. Output ONLY the rewritten query text."
+    )
+
+    response = llm.invoke(prompt)
+    rewritten_query = response.content.strip()
+
+    print(f"-> Rewrote Query (Attempt #{retry_count}): '{rewritten_query}'")
+    
+    # Overwrite subtasks with the single optimized query
+    new_subtasks: List[SubTask] = [{"id": 1, "description": rewritten_query}]
+    return {"subtasks": new_subtasks}
