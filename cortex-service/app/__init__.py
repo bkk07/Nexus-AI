@@ -1,1 +1,0 @@
-"""Cortex service application package."""
