@@ -33,5 +33,5 @@ def run_pipeline(question: str):
 
 
 if __name__ == "__main__":
-    query = sys.argv[1] if len(sys.argv) > 1 else "What are the key goals outlined in our project strategy?"
+    query = sys.argv[1] if len(sys.argv) > 1 else "What are the Employee Benefits & Workplace Policy Guide (2026)?"
     run_pipeline(query)
