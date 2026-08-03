@@ -1,5 +1,5 @@
 from langchain_groq import ChatGroq
-from config import config
+from app.config import config
 
 def get_fast_llm():
     """Lightweight model for quick routing and extraction."""
