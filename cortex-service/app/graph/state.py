@@ -1,4 +1,6 @@
-from typing import TypedDict, List, Optional
+from typing import TypedDict, List, Optional, Annotated
+from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
 
 
 class SubTask(TypedDict):
@@ -13,6 +15,10 @@ class EvidenceItem(TypedDict):
 
 
 class AgentState(TypedDict):
+    # --- Conversation Memory ---
+    messages: Annotated[List[BaseMessage], add_messages]
+    
+    # --- Workflow State ---
     question: str
     intent: Optional[str]
     subtasks: Optional[List[SubTask]]
@@ -20,6 +26,5 @@ class AgentState(TypedDict):
     ranked_evidence: Optional[List[EvidenceItem]]
     generation: Optional[str]
     citations: Optional[List[dict]]
-    # --- New Reflection State Fields ---
     is_relevant: Optional[bool]
     retry_count: Optional[int]

@@ -1,6 +1,8 @@
 import atexit
+from typing import List, Dict, Any
 import weaviate
 from weaviate.classes.init import AdditionalConfig, Timeout
+from weaviate.classes.query import MetadataQuery
 from langchain_weaviate import WeaviateVectorStore
 from app.config import config
 from app.vectorstore.embeddings import get_embedding_model
@@ -17,7 +19,6 @@ def close_weaviate_client():
         except Exception:
             pass
 
-# Register the cleanup hook to run automatically when Python exits
 atexit.register(close_weaviate_client)
 
 def get_weaviate_client() -> weaviate.WeaviateClient:
@@ -46,3 +47,53 @@ def get_vector_store(index_name: str = "DocumentChunk"):
             embedding=embeddings
         )
     return _vector_store
+
+
+def hybrid_search(query_text: str, top_k: int = 5, alpha: float = 0.5) -> List[Dict[str, Any]]:
+    """
+    Executes Weaviate Hybrid Search combining BM25 keyword search with BGE vector embeddings.
+    
+    Args:
+        query_text (str): Search prompt or sub-query.
+        top_k (int): Maximum number of top evidence chunks to return.
+        alpha (float): 0.0 = pure BM25 keyword search, 1.0 = pure vector search, 0.5 = equal fusion.
+    
+    Returns:
+        List[Dict[str, Any]]: List of evidence dictionaries containing content, source, and hybrid score.
+    """
+    client = get_weaviate_client()
+    collection_name = "DocumentChunk"
+
+    if not client.collections.exists(collection_name):
+        return []
+
+    collection = client.collections.get(collection_name)
+    embeddings = get_embedding_model()
+
+    # 1. Generate dense vector locally via BGE
+    query_vector = embeddings.embed_query(query_text)
+
+    # 2. Execute Weaviate v4 Hybrid Search
+    response = collection.query.hybrid(
+        query=query_text,
+        vector=query_vector,
+        alpha=alpha,
+        limit=top_k,
+        return_metadata=MetadataQuery(score=True)
+    )
+
+    results = []
+    for obj in response.objects:
+        props = obj.properties
+        score = obj.metadata.score if obj.metadata else 0.0
+        
+        content = props.get("content") or props.get("text") or ""
+        source = props.get("filename") or props.get("source") or "Unknown"
+
+        results.append({
+            "content": content,
+            "source": source,
+            "score": round(float(score), 4)
+        })
+
+    return results
