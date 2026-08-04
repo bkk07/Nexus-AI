@@ -1,4 +1,4 @@
-from typing import TypedDict, List, Optional, Annotated
+from typing import TypedDict, List, Optional, Dict, Any, Annotated
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
@@ -14,14 +14,18 @@ class EvidenceItem(TypedDict):
     score: float
 
 
-class AgentState(TypedDict):
-    # --- Conversation Memory ---
+class AgentState(TypedDict, total=False):
+    # Multi-tenant Scope
+    project_id: str
+
+    # Conversation Memory
     messages: Annotated[List[BaseMessage], add_messages]
-    
-    # --- Workflow State ---
+
+    # Workflow Attributes
     question: str
     intent: Optional[str]
     subtasks: Optional[List[SubTask]]
+    routed_tasks: Optional[List[Dict[str, Any]]]
     raw_evidence: Optional[List[EvidenceItem]]
     ranked_evidence: Optional[List[EvidenceItem]]
     generation: Optional[str]

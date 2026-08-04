@@ -2,13 +2,14 @@ import atexit
 from typing import List, Dict, Any
 import weaviate
 from weaviate.classes.init import AdditionalConfig, Timeout
-from weaviate.classes.query import MetadataQuery
+from weaviate.classes.query import MetadataQuery, Filter
 from langchain_weaviate import WeaviateVectorStore
 from app.config import config
 from app.vectorstore.embeddings import get_embedding_model
 
 _weaviate_client = None
 _vector_store = None
+
 
 def close_weaviate_client():
     """Gracefully closes the Weaviate client connection upon process exit."""
@@ -20,6 +21,7 @@ def close_weaviate_client():
             pass
 
 atexit.register(close_weaviate_client)
+
 
 def get_weaviate_client() -> weaviate.WeaviateClient:
     global _weaviate_client
@@ -35,6 +37,7 @@ def get_weaviate_client() -> weaviate.WeaviateClient:
         )
     return _weaviate_client
 
+
 def get_vector_store(index_name: str = "DocumentChunk"):
     global _vector_store
     if _vector_store is None:
@@ -49,17 +52,20 @@ def get_vector_store(index_name: str = "DocumentChunk"):
     return _vector_store
 
 
-def hybrid_search(query_text: str, top_k: int = 5, alpha: float = 0.5) -> List[Dict[str, Any]]:
+def hybrid_search(
+    query_text: str,
+    project_id: str,
+    top_k: int = 5,
+    alpha: float = 0.5
+) -> List[Dict[str, Any]]:
     """
-    Executes Weaviate Hybrid Search combining BM25 keyword search with BGE vector embeddings.
+    Executes Weaviate Hybrid Search filtered strictly by project_id.
     
     Args:
         query_text (str): Search prompt or sub-query.
-        top_k (int): Maximum number of top evidence chunks to return.
-        alpha (float): 0.0 = pure BM25 keyword search, 1.0 = pure vector search, 0.5 = equal fusion.
-    
-    Returns:
-        List[Dict[str, Any]]: List of evidence dictionaries containing content, source, and hybrid score.
+        project_id (str): Multi-tenant project scope identifier.
+        top_k (int): Maximum number of evidence chunks to return.
+        alpha (float): 0.0 = pure BM25, 1.0 = pure vector search, 0.5 = hybrid fusion.
     """
     client = get_weaviate_client()
     collection_name = "DocumentChunk"
@@ -70,15 +76,19 @@ def hybrid_search(query_text: str, top_k: int = 5, alpha: float = 0.5) -> List[D
     collection = client.collections.get(collection_name)
     embeddings = get_embedding_model()
 
-    # 1. Generate dense vector locally via BGE
+    # 1. Embed query locally via BGE
     query_vector = embeddings.embed_query(query_text)
 
-    # 2. Execute Weaviate v4 Hybrid Search
+    # 2. Construct strict project_id payload filter
+    tenant_filter = Filter.by_property("project_id").equal(project_id)
+
+    # 3. Execute Weaviate v4 Filtered Hybrid Search
     response = collection.query.hybrid(
         query=query_text,
         vector=query_vector,
         alpha=alpha,
         limit=top_k,
+        filters=tenant_filter,
         return_metadata=MetadataQuery(score=True)
     )
 
@@ -86,14 +96,15 @@ def hybrid_search(query_text: str, top_k: int = 5, alpha: float = 0.5) -> List[D
     for obj in response.objects:
         props = obj.properties
         score = obj.metadata.score if obj.metadata else 0.0
-        
+
         content = props.get("content") or props.get("text") or ""
         source = props.get("filename") or props.get("source") or "Unknown"
 
         results.append({
             "content": content,
             "source": source,
-            "score": round(float(score), 4)
+            "score": round(float(score), 4),
+            "project_id": props.get("project_id", project_id)
         })
 
     return results

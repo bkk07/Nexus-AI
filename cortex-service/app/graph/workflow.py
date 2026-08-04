@@ -1,11 +1,14 @@
-from langgraph.graph import StateGraph, END, START
+from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
+from app.graph.nodes import collector_node
+
 
 from app.graph.state import AgentState
 from app.graph.nodes import (
     intent_detection_node,
     planner_node,
-    retriever_node,
+    router_node,
+    execute_tools_node,
     ranker_node,
     evaluator_node,
     query_rewriter_node,
@@ -15,69 +18,86 @@ from app.graph.nodes import (
 
 
 def route_by_intent(state: AgentState) -> str:
-    intent = state.get("intent", "retrieval_needed")
-    if intent == "simple_qa":
-        return "simple_qa"
-    return "planner"
+    """Routes based on initial query intent classification."""
+    intent = state.get("intent", "simple_qa")
+    if intent == "retrieval_needed":
+        return "planner_node"
+    return "simple_qa_node"
 
 
-def route_after_evaluation(state: AgentState) -> str:
+def route_after_evaluator(state: AgentState) -> str:
+    """Evaluates evidence relevance and manages re-write retries."""
     is_relevant = state.get("is_relevant", False)
     retry_count = state.get("retry_count", 0)
 
-    if is_relevant or retry_count >= 2:
-        return "generator"
-    else:
-        return "query_rewriter"
+    if is_relevant:
+        return "generator_node"
+
+    if retry_count < 2:
+        return "query_rewriter_node"
+
+    # Fall back to generator if retry limit reached
+    return "generator_node"
 
 
-def build_graph():
-    builder = StateGraph(AgentState)
+# Build the Graph
+workflow = StateGraph(AgentState)
 
-    # Nodes
-    builder.add_node("intent_detection", intent_detection_node)
-    builder.add_node("simple_qa", simple_qa_node)
-    builder.add_node("planner", planner_node)
-    builder.add_node("retriever", retriever_node)
-    builder.add_node("ranker", ranker_node)
-    builder.add_node("evaluator", evaluator_node)
-    builder.add_node("query_rewriter", query_rewriter_node)
-    builder.add_node("generator", generator_node)
-
-    # Edges
-    builder.add_edge(START, "intent_detection")
-
-    builder.add_conditional_edges(
-        "intent_detection",
-        route_by_intent,
-        {
-            "simple_qa": "simple_qa",
-            "planner": "planner",
-        },
-    )
-
-    builder.add_edge("planner", "retriever")
-    builder.add_edge("retriever", "ranker")
-    builder.add_edge("ranker", "evaluator")
-
-    builder.add_conditional_edges(
-        "evaluator",
-        route_after_evaluation,
-        {
-            "generator": "generator",
-            "query_rewriter": "query_rewriter",
-        },
-    )
-
-    builder.add_edge("query_rewriter", "retriever")
-    builder.add_edge("simple_qa", END)
-    builder.add_edge("generator", END)
-
-    # Instantiate MemorySaver Checkpointer
-    memory = MemorySaver()
-
-    # Compile with checkpointer enabled
-    return builder.compile(checkpointer=memory)
+# Add Nodes
+workflow.add_node("intent_detection_node", intent_detection_node)
+workflow.add_node("simple_qa_node", simple_qa_node)
+workflow.add_node("planner_node", planner_node)
+workflow.add_node("router_node", router_node)
+workflow.add_node("execute_tools_node", execute_tools_node)
+workflow.add_node("ranker_node", ranker_node)
+workflow.add_node("evaluator_node", evaluator_node)
+workflow.add_node("query_rewriter_node", query_rewriter_node)
+workflow.add_node("generator_node", generator_node)
+workflow.add_node("collector_node", collector_node)
 
 
-rag_app = build_graph()
+# Set Entry Point
+workflow.add_edge(START, "intent_detection_node")
+
+# Conditional Edge for Intent
+workflow.add_conditional_edges(
+    "intent_detection_node",
+    route_by_intent,
+    {
+        "simple_qa_node": "simple_qa_node",
+        "planner_node": "planner_node",
+    },
+)
+
+# Retrieval Sub-Graph Chain
+workflow.add_edge("planner_node", "router_node")
+workflow.add_edge("router_node", "execute_tools_node")
+
+workflow.add_edge("execute_tools_node", "collector_node")
+workflow.add_edge("collector_node", "ranker_node")
+
+workflow.add_edge("ranker_node", "evaluator_node")
+
+# Conditional Edge after Evaluation (Reflection Loop)
+workflow.add_conditional_edges(
+    "evaluator_node",
+    route_after_evaluator,
+    {
+        "generator_node": "generator_node",
+        "query_rewriter_node": "query_rewriter_node",
+    },
+)
+
+
+# Re-writer routes directly back to router for target tools
+workflow.add_edge("query_rewriter_node", "router_node")
+
+# Output Edges
+workflow.add_edge("simple_qa_node", END)
+workflow.add_edge("generator_node", END)
+
+
+
+# In-Memory Checkpointer
+checkpointer = MemorySaver()
+rag_app = workflow.compile(checkpointer=checkpointer)
