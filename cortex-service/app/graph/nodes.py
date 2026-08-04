@@ -1,5 +1,6 @@
 from typing import List
 from pydantic import BaseModel, Field
+from langchain_core.messages import HumanMessage, AIMessage
 
 from app.llm.groq_client import get_fast_llm, get_reasoning_llm
 from app.vectorstore.weaviate_store import get_vector_store
@@ -108,9 +109,8 @@ def ranker_node(state: AgentState) -> dict:
     print(f"-> Retained top {len(top_ranked)} ranked chunk(s).")
     return {"ranked_evidence": top_ranked}
 
-
 def generator_node(state: AgentState) -> dict:
-    """Generates the final answer using Groq Llama-3.3-70b with cited context."""
+    """Generates the final answer using Groq Llama-3.3-70b with cited context and saves stateful memory."""
     print("\n--- [NODE] Answer Generator ---")
     question = state.get("question", "")
     ranked_evidence = state.get("ranked_evidence", [])
@@ -158,6 +158,7 @@ def generator_node(state: AgentState) -> dict:
     
     print("-> Invoking Groq Llama-3.3-70b...")
     response = llm.invoke(system_prompt)
+    answer_text = response.content
     
     citations = [
         {"index": idx + 1, "source": item["source"], "snippet": item["content"][:150]}
@@ -165,11 +166,16 @@ def generator_node(state: AgentState) -> dict:
     ]
     
     print("-> Answer generated successfully!")
+    
+    # Return generation, citations, AND update the conversation message history
     return {
-        "generation": response.content,
-        "citations": citations
+        "generation": answer_text,
+        "citations": citations,
+        "messages": [
+            HumanMessage(content=question),
+            AIMessage(content=answer_text)
+        ]
     }
-
 
 def simple_qa_node(state: AgentState) -> dict:
     """Handles conversational asides without vector search."""

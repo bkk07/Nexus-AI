@@ -1,37 +1,38 @@
-import sys
+from langchain_core.messages import HumanMessage
 from app.graph.workflow import rag_app
 
 
-def run_pipeline(question: str):
-    print(f"\n================ USER QUESTION ================")
-    print(f"{question}\n")
+def run_chat_session():
+    # Define a session thread ID
+    config = {"configurable": {"thread_id": "session_tenant_001"}}
 
-    initial_state = {
-        "question": question,
-        "retry_count": 0,
+    # --- TURN 1 ---
+    q1 = "What is our PTO rollover policy?"
+    print(f"\n================ USER TURN 1: '{q1}' ================")
+    
+    inputs_1 = {
+        "question": q1,
+        "messages": [HumanMessage(content=q1)]
     }
+    
+    result_1 = rag_app.invoke(inputs_1, config=config)
+    print("\n================ ANSWER 1 ================")
+    print(result_1.get("generation"))
 
-    # Execute the LangGraph workflow synchronously
-    final_state = rag_app.invoke(initial_state)
 
-    print("\n================ DETECTED INTENT ================")
-    print(final_state.get("intent", "N/A"))
-
-    if final_state.get("subtasks"):
-        print("\n================ GENERATED SUBTASKS ================")
-        for subtask in final_state["subtasks"]:
-            print(f"- [Task {subtask['id']}] {subtask['description']}")
-
-    print("\n================ FINAL ANSWER ================")
-    print(final_state.get("generation", "No answer generated."))
-
-    if final_state.get("citations"):
-        print("\n================ CITATIONS ================")
-        for cit in final_state["citations"]:
-            print(f"[{cit['index']}] Source: {cit['source']}")
-            print(f"    Snippet: {cit['snippet']}...\n")
+    # --- TURN 2 (Follow-up requiring memory) ---
+    q2 = "How many total sick days do we get per year alongside that?"
+    print(f"\n================ USER TURN 2: '{q2}' ================")
+    
+    inputs_2 = {
+        "question": q2,
+        "messages": [HumanMessage(content=q2)]
+    }
+    
+    result_2 = rag_app.invoke(inputs_2, config=config)
+    print("\n================ ANSWER 2 ================")
+    print(result_2.get("generation"))
 
 
 if __name__ == "__main__":
-    query = sys.argv[1] if len(sys.argv) > 1 else "What are the Employee Benefits & Workplace Policy Guide (2026)?"
-    run_pipeline(query)
+    run_chat_session()
