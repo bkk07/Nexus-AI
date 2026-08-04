@@ -8,10 +8,14 @@ class SubTask(TypedDict):
     description: str
 
 
-class EvidenceItem(TypedDict):
+class EvidenceItem(TypedDict, total=False):
     content: str
     source: str
     score: float
+    normalized_score: float
+    source_type: Optional[str]
+    source_ref_id: Optional[str]
+    metadata: Optional[Dict[str, Any]]
 
 
 class AgentState(TypedDict, total=False):
@@ -27,6 +31,7 @@ class AgentState(TypedDict, total=False):
     subtasks: Optional[List[SubTask]]
     routed_tasks: Optional[List[Dict[str, Any]]]
     raw_evidence: Optional[List[EvidenceItem]]
+    collected_evidence: Optional[List[EvidenceItem]]
     ranked_evidence: Optional[List[EvidenceItem]]
     generation: Optional[str]
     citations: Optional[List[dict]]

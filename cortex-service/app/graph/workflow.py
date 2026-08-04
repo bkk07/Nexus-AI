@@ -1,7 +1,5 @@
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
-from app.graph.nodes import collector_node
-
 
 from app.graph.state import AgentState
 from app.graph.nodes import (
@@ -9,6 +7,7 @@ from app.graph.nodes import (
     planner_node,
     router_node,
     execute_tools_node,
+    collector_node,
     ranker_node,
     evaluator_node,
     query_rewriter_node,
@@ -26,7 +25,7 @@ def route_by_intent(state: AgentState) -> str:
 
 
 def route_after_evaluator(state: AgentState) -> str:
-    """Evaluates evidence relevance and manages re-write retries."""
+    """Evaluates evidence relevance and manages rewrite retries."""
     is_relevant = state.get("is_relevant", False)
     retry_count = state.get("retry_count", 0)
 
@@ -49,12 +48,11 @@ workflow.add_node("simple_qa_node", simple_qa_node)
 workflow.add_node("planner_node", planner_node)
 workflow.add_node("router_node", router_node)
 workflow.add_node("execute_tools_node", execute_tools_node)
+workflow.add_node("collector_node", collector_node)
 workflow.add_node("ranker_node", ranker_node)
 workflow.add_node("evaluator_node", evaluator_node)
 workflow.add_node("query_rewriter_node", query_rewriter_node)
 workflow.add_node("generator_node", generator_node)
-workflow.add_node("collector_node", collector_node)
-
 
 # Set Entry Point
 workflow.add_edge(START, "intent_detection_node")
@@ -72,10 +70,8 @@ workflow.add_conditional_edges(
 # Retrieval Sub-Graph Chain
 workflow.add_edge("planner_node", "router_node")
 workflow.add_edge("router_node", "execute_tools_node")
-
 workflow.add_edge("execute_tools_node", "collector_node")
 workflow.add_edge("collector_node", "ranker_node")
-
 workflow.add_edge("ranker_node", "evaluator_node")
 
 # Conditional Edge after Evaluation (Reflection Loop)
@@ -88,15 +84,12 @@ workflow.add_conditional_edges(
     },
 )
 
-
-# Re-writer routes directly back to router for target tools
+# Query Rewriter routes back to tool router for secondary search attempt
 workflow.add_edge("query_rewriter_node", "router_node")
 
 # Output Edges
 workflow.add_edge("simple_qa_node", END)
 workflow.add_edge("generator_node", END)
-
-
 
 # In-Memory Checkpointer
 checkpointer = MemorySaver()

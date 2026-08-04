@@ -1,20 +1,27 @@
-from typing import List
-from pydantic import BaseModel, Field
 import asyncio
+from typing import List,Literal
+from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from app.llm.groq_client import get_fast_llm, get_reasoning_llm
-from app.vectorstore.weaviate_store import hybrid_search
 from app.graph.state import AgentState, SubTask, EvidenceItem
 from app.tools.registry import get_tool
+
+# from app.prompts.intent_prompt import get_intent_prompt;
+
 
 # ==========================================
 # Pydantic Schemas for Structured Outputs
 # ==========================================
-
 class IntentClassification(BaseModel):
-    intent: str = Field(
-        description="Classify query as 'simple_qa' (e.g. greetings, chat, general knowledge) or 'retrieval_needed' (specific document or enterprise data lookup required)."
+    intent: Literal["simple_qa", "retrieval_needed"] = Field(
+        description=(
+            "MUST be either 'simple_qa' or 'retrieval_needed'.\n"
+            "- Use 'retrieval_needed' whenever the user asks to search, check, find, or retrieve information "
+            "from external sources like emails, inbox, documents, policies, notion notes, or calendar schedules.\n"
+            "- Use 'simple_qa' ONLY for greetings, chitchat, general knowledge, introducing oneself (e.g. 'My name is...'), "
+            "or meta-questions about the ongoing conversation history."
+        )
     )
 
 class PlannerOutput(BaseModel):
@@ -22,10 +29,12 @@ class PlannerOutput(BaseModel):
         description="A list of 1 to 3 distinct sub-queries or tasks required to answer the user's question completely."
     )
 
+
 class RelevanceScore(BaseModel):
     binary_score: str = Field(
         description="Grade whether retrieved evidence is relevant to the user question. 'yes' or 'no'."
     )
+
 
 # ==========================================
 # Deterministic Tool Routing Map
@@ -38,6 +47,7 @@ KEYWORD_MAP = {
     "pdf_search": ["document", "pdf", "report", "spec", "file", "policy", "guide"],
 }
 
+
 def rule_based_route(subtask_desc: str) -> str:
     """Fast deterministic rule matching for tool routing."""
     text = subtask_desc.lower()
@@ -45,6 +55,7 @@ def rule_based_route(subtask_desc: str) -> str:
         if any(k in text for k in keywords):
             return tool_name
     return "pdf_search"  # Default fallback tool
+
 
 # ==========================================
 # Core Graph Nodes
@@ -74,14 +85,12 @@ def simple_qa_node(state: AgentState) -> dict:
                 "Respond concisely and utilize the previous conversation history when answering."
     )
     
-    # Combine system instruction with full conversation history
     prompt_messages = [system_prompt] + messages
 
     llm = get_fast_llm()
     response = llm.invoke(prompt_messages)
     answer_text = response.content
 
-    # Append ONLY the AI response message (LangGraph handles thread history merging)
     return {
         "generation": answer_text,
         "citations": [],
@@ -142,44 +151,91 @@ def router_node(state: AgentState) -> dict:
     return {"routed_tasks": routed_tasks}
 
 
-def execute_tools_node(state: AgentState) -> dict:
-    """Executes tool calls across routed targets with project_id isolation."""
-    print("\n--- [NODE] Tool Executor ---")
+async def execute_tools_node(state: AgentState) -> dict:
+    """Executes routed tool calls concurrently across registered sources."""
+    print("\n--- [NODE] Parallel Tool Executor ---")
     routed_tasks = state.get("routed_tasks") or []
     project_id = state.get("project_id", "default_project")
 
-    raw_evidence = []
-    for task in routed_tasks:
+    async def _run_single_tool(task):
         tool_name = task["tool_name"]
         tool_args = task["tool_args"]
-        
-        tool = get_tool(tool_name)
-        results = tool.execute(args=tool_args, project_id=project_id)
-        raw_evidence.extend(results)
+        try:
+            tool = get_tool(tool_name)
+            if asyncio.iscoroutinefunction(tool.execute):
+                return await tool.execute(args=tool_args, project_id=project_id)
+            else:
+                return tool.execute(args=tool_args, project_id=project_id)
+        except Exception as e:
+            print(f"   [!] Tool '{tool_name}' failed gracefully: {e}")
+            return []
 
-    print(f" -> Total raw evidence items gathered: {len(raw_evidence)}")
+    tool_results = await asyncio.gather(*[_run_single_tool(task) for task in routed_tasks])
+    
+    raw_evidence = []
+    for result in tool_results:
+        raw_evidence.extend(result)
+
+    print(f" -> Total raw evidence items gathered concurrently: {len(raw_evidence)}")
     return {"raw_evidence": raw_evidence}
 
 
+def collector_node(state: AgentState) -> dict:
+    """Flattens raw evidence and normalizes raw scores to a standardized 0.0 - 1.0 range."""
+    print("\n--- [NODE] Evidence Collector ---")
+    raw_evidence = state.get("raw_evidence") or []
+    
+    if not raw_evidence:
+        print(" -> No raw evidence collected.")
+        return {"collected_evidence": []}
+
+    scores = [float(item.get("score", 0.0)) for item in raw_evidence]
+    max_score = max(scores) if scores else 1.0
+    min_score = min(scores) if scores else 0.0
+    score_range = max_score - min_score
+
+    collected_evidence = []
+    for item in raw_evidence:
+        raw_score = float(item.get("score", 0.0))
+        
+        if score_range > 0:
+            norm_score = (raw_score - min_score) / score_range
+        else:
+            norm_score = 0.8
+
+        normalized_item = {
+            **item,
+            "normalized_score": round(norm_score, 4)
+        }
+        collected_evidence.append(normalized_item)
+
+    print(f" -> Collected and normalized {len(collected_evidence)} evidence items.")
+    return {"collected_evidence": collected_evidence}
+
+
 def ranker_node(state: AgentState) -> dict:
-    """Deduplicates and ranks retrieved evidence chunks."""
+    """Deduplicates and ranks normalized evidence chunks."""
     print("\n--- [NODE] Evidence Ranker ---")
-    raw_evidence = state.get("raw_evidence", [])
+    evidence_pool = state.get("collected_evidence") or state.get("raw_evidence") or []
     
     seen_contents = set()
     deduped_evidence: List[EvidenceItem] = []
     
-    for item in raw_evidence:
+    for item in evidence_pool:
         content = item.get("content", "")
         if content and content not in seen_contents:
             seen_contents.add(content)
             deduped_evidence.append(item)
             
-    sorted_evidence = sorted(deduped_evidence, key=lambda x: x.get("score", 0.0), reverse=True)
+    sorted_evidence = sorted(
+        deduped_evidence, 
+        key=lambda x: x.get("normalized_score", x.get("score", 0.0)), 
+        reverse=True
+    )
     top_ranked = sorted_evidence[:8]
     
-    print(f"-> Deduplicated from {len(raw_evidence)} to {len(deduped_evidence)} items.")
-    print(f"-> Retained top {len(top_ranked)} ranked chunk(s).")
+    print(f" -> Deduplicated from {len(evidence_pool)} to {len(deduped_evidence)} items.")
+    print(f" -> Retained top {len(top_ranked)} ranked chunk(s).")
     return {"ranked_evidence": top_ranked}
 
 
@@ -191,7 +247,7 @@ def evaluator_node(state: AgentState) -> dict:
     retry_count = state.get("retry_count") or 0
 
     if not ranked_evidence:
-        print("-> No evidence retrieved. Grading as 'no'.")
+        print(" -> No evidence retrieved. Grading as 'no'.")
         return {"is_relevant": False, "retry_count": retry_count + 1}
 
     llm = get_fast_llm()
@@ -210,7 +266,7 @@ def evaluator_node(state: AgentState) -> dict:
     result: RelevanceScore = structured_llm.invoke(prompt)
     is_relevant = result.binary_score.lower().strip() == "yes"
 
-    print(f"-> Evidence Grade: '{result.binary_score.upper()}' | Relevancy: {is_relevant}")
+    print(f" -> Evidence Grade: '{result.binary_score.upper()}' | Relevancy: {is_relevant}")
     return {"is_relevant": is_relevant, "retry_count": retry_count + 1}
 
 
@@ -231,7 +287,7 @@ def query_rewriter_node(state: AgentState) -> dict:
     response = llm.invoke(prompt)
     rewritten_query = response.content.strip()
 
-    print(f"-> Rewrote Query (Attempt #{retry_count}): '{rewritten_query}'")
+    print(f" -> Rewrote Query (Attempt #{retry_count}): '{rewritten_query}'")
     
     new_subtasks: List[SubTask] = [{"id": 1, "description": rewritten_query}]
     return {"subtasks": new_subtasks}
@@ -280,7 +336,7 @@ def generator_node(state: AgentState) -> dict:
     Final Answer:
     """
     
-    print("-> Invoking Groq Llama-3.3-70b...")
+    print(" -> Invoking Groq Llama-3.3-70b...")
     response = llm.invoke(system_prompt)
     answer_text = response.content
     
@@ -289,74 +345,10 @@ def generator_node(state: AgentState) -> dict:
         for idx, item in enumerate(ranked_evidence)
     ]
     
-    print("-> Answer generated successfully!")
+    print(" -> Answer generated successfully!")
     
     return {
         "generation": answer_text,
         "citations": citations,
         "messages": [AIMessage(content=answer_text)]
     }
-
-
-def collector_node(state: AgentState) -> dict:
-    """Flattens raw evidence and normalizes scores to a standardized 0.0 - 1.0 range."""
-    print("\n--- [NODE] Evidence Collector ---")
-    raw_evidence = state.get("raw_evidence") or []
-    
-    if not raw_evidence:
-        print(" -> No raw evidence collected.")
-        return {"collected_evidence": []}
-
-    collected_evidence = []
-    
-    # Calculate min/max scores for normalization
-    scores = [float(item.get("score", 0.0)) for item in raw_evidence]
-    max_score = max(scores) if scores else 1.0
-    min_score = min(scores) if scores else 0.0
-    score_range = max_score - min_score if max_score != min_score else 1.0
-
-    for item in raw_evidence:
-        raw_score = float(item.get("score", 0.0))
-        # Min-max score normalization
-        normalized_score = (raw_score - min_score) / score_range if max_score != min_score else 0.8
-        
-        normalized_item = {
-            **item,
-            "normalized_score": round(normalized_score, 4)
-        }
-        collected_evidence.append(normalized_item)
-
-    print(f" -> Collected and normalized {len(collected_evidence)} evidence items.")
-    return {"collected_evidence": collected_evidence}
-
-
-
-async def execute_tools_node(state: AgentState) -> dict:
-    """Executes routed tool calls concurrently across registered sources."""
-    print("\n--- [NODE] Parallel Tool Executor ---")
-    routed_tasks = state.get("routed_tasks") or []
-    project_id = state.get("project_id", "default_project")
-
-    async def _run_single_tool(task):
-        tool_name = task["tool_name"]
-        tool_args = task["tool_args"]
-        try:
-            tool = get_tool(tool_name)
-            # Support both sync and async tool implementations
-            if asyncio.iscoroutinefunction(tool.execute):
-                return await tool.execute(args=tool_args, project_id=project_id)
-            else:
-                return tool.execute(args=tool_args, project_id=project_id)
-        except Exception as e:
-            print(f"   [!] Tool '{tool_name}' failed gracefully: {e}")
-            return []
-
-    # Dispatch all routed tools concurrently
-    tool_results = await asyncio.gather(*[_run_single_tool(task) for task in routed_tasks])
-    
-    raw_evidence = []
-    for result in tool_results:
-        raw_evidence.extend(result)
-
-    print(f" -> Total raw evidence items gathered concurrently: {len(raw_evidence)}")
-    return {"raw_evidence": raw_evidence}
