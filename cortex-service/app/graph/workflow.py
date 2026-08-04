@@ -1,4 +1,6 @@
 from langgraph.graph import StateGraph, END, START
+from langgraph.checkpoint.memory import MemorySaver
+
 from app.graph.state import AgentState
 from app.graph.nodes import (
     intent_detection_node,
@@ -13,7 +15,6 @@ from app.graph.nodes import (
 
 
 def route_by_intent(state: AgentState) -> str:
-    """Routes based on intent classification."""
     intent = state.get("intent", "retrieval_needed")
     if intent == "simple_qa":
         return "simple_qa"
@@ -21,24 +22,19 @@ def route_by_intent(state: AgentState) -> str:
 
 
 def route_after_evaluation(state: AgentState) -> str:
-    """Determines whether to generate answer or rewrite query based on evaluation."""
     is_relevant = state.get("is_relevant", False)
     retry_count = state.get("retry_count", 0)
 
-    # Allow up to 2 retrieval attempts before forcing generator
     if is_relevant or retry_count >= 2:
-        if not is_relevant:
-            print("-> Max retries (2) reached. Proceeding to generator with available context.")
         return "generator"
     else:
-        print("-> Context insufficient. Routing to Query Rewriter...")
         return "query_rewriter"
 
 
 def build_graph():
     builder = StateGraph(AgentState)
 
-    # Add All Nodes
+    # Nodes
     builder.add_node("intent_detection", intent_detection_node)
     builder.add_node("simple_qa", simple_qa_node)
     builder.add_node("planner", planner_node)
@@ -48,7 +44,7 @@ def build_graph():
     builder.add_node("query_rewriter", query_rewriter_node)
     builder.add_node("generator", generator_node)
 
-    # Add Linear & Conditional Edges
+    # Edges
     builder.add_edge(START, "intent_detection")
 
     builder.add_conditional_edges(
@@ -60,12 +56,10 @@ def build_graph():
         },
     )
 
-    # Retrieval -> Ranker -> Evaluator pipeline
     builder.add_edge("planner", "retriever")
     builder.add_edge("retriever", "ranker")
     builder.add_edge("ranker", "evaluator")
 
-    # Reflection Conditional Router
     builder.add_conditional_edges(
         "evaluator",
         route_after_evaluation,
@@ -75,14 +69,15 @@ def build_graph():
         },
     )
 
-    # Loop Rewriter back into Retriever
     builder.add_edge("query_rewriter", "retriever")
-
-    # Terminal Edges
     builder.add_edge("simple_qa", END)
     builder.add_edge("generator", END)
 
-    return builder.compile()
+    # Instantiate MemorySaver Checkpointer
+    memory = MemorySaver()
+
+    # Compile with checkpointer enabled
+    return builder.compile(checkpointer=memory)
 
 
 rag_app = build_graph()
