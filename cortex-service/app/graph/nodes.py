@@ -5,6 +5,7 @@ from app.llm.groq_client import get_fast_llm, get_reasoning_llm
 from app.vectorstore.weaviate_store import get_vector_store
 from app.graph.state import AgentState, SubTask, EvidenceItem
 
+from app.vectorstore.weaviate_store import hybrid_search
 
 # ==========================================
 # Pydantic Schemas for Structured Outputs
@@ -66,53 +67,23 @@ def planner_node(state: AgentState) -> dict:
         
     return {"subtasks": subtasks}
 
-
 def retriever_node(state: AgentState) -> dict:
-    """Queries local Weaviate vector store using search for each subtask."""
-    print("\n--- [NODE] Vector Retriever ---")
-    subtasks = state.get("subtasks", [])
+    """Retrieves relevant evidence chunks using Weaviate Hybrid Search (BM25 + Vector)."""
+    print("\n--- [NODE] Vector Retriever (Hybrid Search) ---")
+    subtasks = state.get("subtasks") or []
     question = state.get("question", "")
-    vector_store = get_vector_store()
-    
-    # Collect queries: include subtasks if present, otherwise use raw question
-    queries = [st["description"] for st in subtasks] if subtasks else [question]
-    collected_evidence: List[EvidenceItem] = []
-    
-    for query in queries:
-        print(f"-> Searching Weaviate for query: '{query}'")
-        # Perform similarity search with explicit score tuple handling
-        try:
-            results = vector_store.similarity_search_with_score(query, k=4)
 
-            print("=" * 60)
-            print(f"Query: {query}")
-            print(f"Results: {results}")
-            print("=" * 60)
+    queries = [task["description"] for task in subtasks] if subtasks else [question]
+    raw_evidence = []
 
-            for doc, score in results:
-                print("-" * 60)
-                print(f"Score: {score}")
-                print(f"Source: {doc.metadata}")
-                print(f"Content: {doc.page_content[:200]}")
-                evidence: EvidenceItem = {
-                    "content": doc.page_content,
-                    "source": doc.metadata.get("filename", doc.metadata.get("source", "Document")),
-                    "score": float(score) if score is not None else 0.8
-                }
-                collected_evidence.append(evidence)
-        except Exception as e:
-            print(f"   [!] Retrieval fallback: {e}")
-            docs = vector_store.similarity_search(query, k=4)
-            for doc in docs:
-                evidence: EvidenceItem = {
-                    "content": doc.page_content,
-                    "source": doc.metadata.get("filename", doc.metadata.get("source", "Document")),
-                    "score": 0.8
-                }
-                collected_evidence.append(evidence)
-                
-    print(f"-> Retrived {len(collected_evidence)} raw evidence chunk(s).")
-    return {"raw_evidence": collected_evidence}
+    for q in queries:
+        print(f"-> Hybrid Searching Weaviate for query: '{q}'")
+        # alpha=0.5 guarantees equal weight between BM25 keywords & BGE vector similarity
+        results = hybrid_search(query_text=q, top_k=3, alpha=0.5)
+        raw_evidence.extend(results)
+
+    print(f"-> Retrieved {len(raw_evidence)} raw evidence chunk(s).")
+    return {"raw_evidence": raw_evidence}
 
 
 def ranker_node(state: AgentState) -> dict:
@@ -153,14 +124,37 @@ def generator_node(state: AgentState) -> dict:
             context_blocks.append(f"[{idx}] (Source: {item['source']})\n{item['content']}")
         formatted_context = "\n\n".join(context_blocks)
         
-    system_prompt = (
-        "You are an expert enterprise assistant. Answer the user's question accurately using ONLY "
-        "the provided context below. Cite your sources inline using bracketed numbers like [1], [2] "
-        "that match the provided context indices.\n\n"
-        f"Context:\n{formatted_context}\n\n"
-        f"Question: {question}\n\n"
-        "Answer:"
-    )
+    system_prompt = f"""
+    You are an enterprise RAG assistant.
+
+    Your job is to answer the user's question ONLY using the supplied context.
+
+    Rules:
+
+    1. Never use outside knowledge.
+    2. Never invent information.
+    3. Never explain your reasoning.
+    4. Never self-correct.
+    5. Never say things like:
+    - "I apologize"
+    - "Actually"
+    - "I made a mistake"
+    - "The correct source is..."
+    6. Produce only the final answer.
+    7. Every factual statement must end with one or more citations like [1] or [2].
+    8. If the context does not contain enough information, reply exactly:
+    "I don't have enough information in the provided documents."
+
+    Context:
+    -----------------------
+    {formatted_context}
+    -----------------------
+
+    Question:
+    {question}
+
+    Final Answer:
+    """
     
     print("-> Invoking Groq Llama-3.3-70b...")
     response = llm.invoke(system_prompt)
