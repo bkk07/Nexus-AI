@@ -10,8 +10,8 @@ from app.vectorstore.weaviate_store import get_vector_store
 DATA_DIR = Path("./data")
 
 
-def load_documents(data_dir: Path) -> List[Document]:
-    """Scans the data directory and loads PDF, MD, and TXT files."""
+def load_documents(data_dir: Path, project_id: str = "proj_phoenix_001") -> List[Document]:
+    """Scans the data directory and loads PDF, MD, and TXT files, stamping tenant project_id."""
     documents: List[Document] = []
 
     if not data_dir.exists():
@@ -37,14 +37,15 @@ def load_documents(data_dir: Path) -> List[Document]:
                 print(f"   [Skipped] Unsupported file type: {file_path.name}")
                 continue
 
-            # Standardize and enrich baseline metadata
+            # Standardize and enrich baseline metadata including project_id
             for doc in raw_docs:
+                doc.metadata["project_id"] = project_id
                 doc.metadata["filename"] = file_path.name
                 doc.metadata["file_path"] = str(file_path)
                 doc.metadata["source"] = file_path.name  # For clean citations
 
             documents.extend(raw_docs)
-            print(f"-> Successfully loaded {len(raw_docs)} document unit(s) from '{file_path.name}'")
+            print(f"-> Successfully loaded {len(raw_docs)} document unit(s) from '{file_path.name}' [Project: {project_id}]")
 
         except Exception as e:
             print(f"   [!] Failed to load '{file_path.name}': {e}")
@@ -52,8 +53,8 @@ def load_documents(data_dir: Path) -> List[Document]:
     return documents
 
 
-def chunk_documents(documents: List[Document]) -> List[Document]:
-    """Splits raw documents into optimized chunks with boundary preservation."""
+def chunk_documents(documents: List[Document], project_id: str = "proj_phoenix_001") -> List[Document]:
+    """Splits raw documents into optimized chunks with boundary preservation and project_id metadata."""
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=800,       # Ideal balance for BGE embedding context windows
         chunk_overlap=150,     # Preserves context across sentence cuts
@@ -62,24 +63,25 @@ def chunk_documents(documents: List[Document]) -> List[Document]:
     )
     chunks = text_splitter.split_documents(documents)
 
-    # Attach explicit chunk index for tracking
+    # Attach explicit chunk index and ensure project_id metadata is stamped on every chunk
     for idx, chunk in enumerate(chunks):
+        chunk.metadata["project_id"] = project_id
         chunk.metadata["chunk_id"] = f"{chunk.metadata.get('filename', 'doc')}_{idx}"
 
     return chunks
 
 
-def run_ingestion():
-    print("================ STARTING DOCUMENT INGESTION ================")
-    docs = load_documents(DATA_DIR)
+def run_ingestion(project_id: str = "proj_phoenix_001"):
+    print(f"================ STARTING DOCUMENT INGESTION [Project: {project_id}] ================")
+    docs = load_documents(DATA_DIR, project_id=project_id)
     
     if not docs:
         print("-> Ingestion aborted: No valid documents to process.")
         return
 
     print(f"\n-> Chunking {len(docs)} document page(s)/file(s)...")
-    chunks = chunk_documents(docs)
-    print(f"-> Generated {len(chunks)} text chunks.")
+    chunks = chunk_documents(docs, project_id=project_id)
+    print(f"-> Generated {len(chunks)} text chunks tagged with project_id='{project_id}'.")
 
     print("\n-> Upserting chunks into local Weaviate vector store...")
     vector_store = get_vector_store()

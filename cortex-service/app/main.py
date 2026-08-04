@@ -1,38 +1,55 @@
+import uuid
+import warnings
+# Suppress HTTPS client unclosed socket warnings on CLI exit
+warnings.filterwarnings("ignore", category=ResourceWarning)
+
 from langchain_core.messages import HumanMessage
 from app.graph.workflow import rag_app
 
 
-def run_chat_session():
-    # Define a session thread ID
-    config = {"configurable": {"thread_id": "session_tenant_001"}}
+def run_interactive_chat():
+    session_id = f"session_{uuid.uuid4().hex[:8]}"
+    project_id = "proj_phoenix_001"
+    config = {"configurable": {"thread_id": session_id}}
 
-    # --- TURN 1 ---
-    q1 = "What is our PTO rollover policy?"
-    print(f"\n================ USER TURN 1: '{q1}' ================")
-    
-    inputs_1 = {
-        "question": q1,
-        "messages": [HumanMessage(content=q1)]
-    }
-    
-    result_1 = rag_app.invoke(inputs_1, config=config)
-    print("\n================ ANSWER 1 ================")
-    print(result_1.get("generation"))
+    print("================ CORTEX AI INTERACTIVE CHAT ================")
+    print(f"Session Thread ID: {session_id}")
+    print(f"Active Project Scope: {project_id}")
+    print("Type 'exit', 'quit', or 'q' to end the session.\n")
 
+    while True:
+        try:
+            user_input = input("\nYou > ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\nExiting session. Goodbye!")
+            break
 
-    # --- TURN 2 (Follow-up requiring memory) ---
-    q2 = "How many total sick days do we get per year alongside that?"
-    print(f"\n================ USER TURN 2: '{q2}' ================")
-    
-    inputs_2 = {
-        "question": q2,
-        "messages": [HumanMessage(content=q2)]
-    }
-    
-    result_2 = rag_app.invoke(inputs_2, config=config)
-    print("\n================ ANSWER 2 ================")
-    print(result_2.get("generation"))
+        if not user_input:
+            continue
+
+        if user_input.lower() in ["exit", "quit", "q"]:
+            print("\nEnding chat session. Goodbye!")
+            break
+
+        # Pass current turn into inputs (LangGraph add_messages reducer appends this)
+        inputs = {
+            "question": user_input,
+            "project_id": project_id,
+            "messages": [HumanMessage(content=user_input)]
+        }
+
+        # Execute workflow graph with checkpointer
+        result = rag_app.invoke(inputs, config=config)
+
+        print("\nAgent >")
+        print(result.get("generation"))
+
+        citations = result.get("citations", [])
+        if citations:
+            print("\nSources:")
+            for c in citations:
+                print(f"  [{c['index']}] {c['source']}")
 
 
 if __name__ == "__main__":
-    run_chat_session()
+    run_interactive_chat()
