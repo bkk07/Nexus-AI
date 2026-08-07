@@ -1,57 +1,32 @@
-"""Pydantic schemas for Gmail Tools."""
+"""Shared Pydantic schemas for the Gmail integration tool."""
 
-from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
+from datetime import datetime
+from enum import Enum
+from typing import List, Optional, Dict, Any
 
+class EvidenceItem(BaseModel):
+    content: str
+    source: str
+    score: float = Field(ge=0.0, le=1.0)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
-class EmailMessage(BaseModel):
-    """Structured representation of an email message."""
+class GmailActionType(str, Enum):
+    SEARCH_EMAILS = "search_emails"
+    GET_THREAD = "get_thread"
+    GET_UNREAD_SUMMARY = "get_unread_summary"
+    CREATE_DRAFT = "create_draft"
 
-    id: str = Field(..., description="Gmail message ID")
-    thread_id: str = Field(..., description="Gmail thread ID")
-    subject: str = Field(default="", description="Email subject line")
-    sender: str = Field(default="", description="From address/name")
-    recipient: str = Field(default="", description="To address")
-    date: str = Field(default="", description="Date sent/received")
-    snippet: str = Field(default="", description="Short text snippet")
-    body: str = Field(default="", description="Full email plain-text body")
-    is_unread: bool = Field(default=False, description="Unread status flag")
-    is_starred: bool = Field(default=False, description="Starred status flag")
-    has_attachments: bool = Field(
-        default=False, description="Attachment presence flag"
-    )
-    attachment_names: List[str] = Field(
-        default_factory=list, description="List of attachment file names"
-    )
+class GmailToolArgs(BaseModel):
+    action: GmailActionType
+    query: Optional[str] = None
+    thread_id: Optional[str] = None
+    to: Optional[List[str]] = None
+    subject: Optional[str] = None
+    body: Optional[str] = None
+    max_results: int = Field(default=10, le=50)
 
-
-class SearchEmailsInput(BaseModel):
-    """Input parameters for searching emails."""
-
-    query: Optional[str] = Field(
-        default=None,
-        description="Search query or terms (e.g., 'interview', 'offer letter', 'Google')",
-    )
-    unread_only: bool = Field(
-        default=False, description="Filter for unread messages only"
-    )
-    starred_only: bool = Field(
-        default=False, description="Filter for starred messages only"
-    )
-    has_attachment: bool = Field(
-        default=False, description="Filter for emails with attachments"
-    )
-    sender: Optional[str] = Field(
-        default=None, description="Filter by sender email address or name"
-    )
-    max_results: int = Field(
-        default=10, description="Maximum number of emails to retrieve (1-50)"
-    )
-
-
-class ReadEmailInput(BaseModel):
-    """Input parameters for fetching a specific email by ID."""
-
-    email_id: str = Field(
-        ..., description="The unique Gmail message ID to fetch"
-    )
+class DraftResult(BaseModel):
+    draft_id: str
+    thread_id: Optional[str]
+    created_at: datetime

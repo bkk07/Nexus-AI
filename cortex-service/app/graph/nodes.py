@@ -41,10 +41,23 @@ class RelevanceScore(BaseModel):
 # ==========================================
 
 KEYWORD_MAP = {
+    # 1. Primary Domain Tools (Check these first)
     "gmail_search": ["email", "emails", "inbox", "sent", "message", "mail"],
-    "notion_search": ["notes", "notion", "task", "tasks", "wiki", "page"],
     "calendar_search": ["meeting", "deadline", "calendar", "schedule", "event"],
+    "notion_search": ["notes", "notion", "task", "tasks", "wiki", "page"],
     "pdf_search": ["document", "pdf", "report", "spec", "file", "policy", "guide"],
+    
+    # 2. Date Tool (Specific temporal intent phrases)
+    "date_tool": [
+        "today's date",
+        "current date",
+        "current year",
+        "what year",
+        "what is today",
+        "current time",
+        "day of week",
+        "what day is it",
+    ],
 }
 
 
@@ -99,15 +112,20 @@ def simple_qa_node(state: AgentState) -> dict:
 
 
 def planner_node(state: AgentState) -> dict:
-    """Decomposes the user query into 1-3 targeted subtasks."""
+    """Decomposes user query into focused search subtasks."""
     print("\n--- [NODE] Query Planner ---")
     question = state.get("question", "")
     llm = get_fast_llm()
     structured_llm = llm.with_structured_output(PlannerOutput)
     
     prompt = (
-        "Decompose the following user question into 1 to 3 focused sub-queries for evidence retrieval:\n\n"
-        f"Question: {question}"
+        "You are an enterprise search query planner.\n"
+        "Decompose the user question into 1 to 2 concise retrieval subqueries targeting underlying data.\n\n"
+        "RULES:\n"
+        "1. Output ONLY search terms targeting documents or emails.\n"
+        "2. NEVER generate action steps like 'summarize the results', 'analyze data', or 'format output'.\n"
+        "3. Do NOT include meta-instructions like 'search Gmail for' or 'retrieve emails'.\n\n"
+        f"User Question: {question}"
     )
     result: PlannerOutput = structured_llm.invoke(prompt)
     
@@ -250,42 +268,52 @@ def evaluator_node(state: AgentState) -> dict:
         print(" -> No evidence retrieved. Grading as 'no'.")
         return {"is_relevant": False, "retry_count": retry_count + 1}
 
-    llm = get_fast_llm()
-    structured_llm = llm.with_structured_output(RelevanceScore)
+    try:
+        llm = get_fast_llm().bind(response_format={"type": "json_object"})
 
-    context_sample = "\n---\n".join([item["content"] for item in ranked_evidence[:3]])
-    prompt = (
-        "You are an expert grader evaluating whether retrieved documents contain relevant information "
-        "to answer a user question.\n\n"
-        f"User Question: {question}\n\n"
-        f"Retrieved Evidence Sample:\n{context_sample}\n\n"
-        "Does the evidence contain information directly relevant to answering the question? "
-        "Grade with 'yes' or 'no'."
-    )
+        context_sample = "\n---\n".join([item.get("content", "")[:300] for item in ranked_evidence[:3]])
+        
+        prompt = (
+            "You are an evidence relevance evaluator.\n"
+            "Evaluate whether the retrieved documents contain information relevant to fulfilling the user request.\n\n"
+            "IMPORTANT EVALUATION RULES:\n"
+            "1. For open-ended or summary requests (e.g., 'summarize emails', 'check my inbox', 'latest messages'), "
+            "grade 'YES' as long as the retrieved documents are emails/messages from the requested timeframe or source.\n"
+            "2. Grade 'NO' ONLY if the retrieved documents are completely off-topic or empty.\n\n"
+            f"User Question: {question}\n\n"
+            f"Retrieved Context Sample:\n{context_sample}\n\n"
+            'Respond ONLY with a JSON object: {"binary_score": "yes"} or {"binary_score": "no"}'
+        )
 
-    result: RelevanceScore = structured_llm.invoke(prompt)
-    is_relevant = result.binary_score.lower().strip() == "yes"
+        response = llm.invoke(prompt)
+        import json
+        data = json.loads(response.content)
+        
+        binary_score = data.get("binary_score", "yes").lower().strip()
+        is_relevant = binary_score == "yes"
+        print(f" -> Evidence Grade: '{binary_score.upper()}' | Relevancy: {is_relevant}")
 
-    print(f" -> Evidence Grade: '{result.binary_score.upper()}' | Relevancy: {is_relevant}")
+    except Exception as e:
+        print(f" -> [!] Evaluator parsing issue ({e}). Defaulting relevancy to True to continue flow.")
+        is_relevant = True
+
     return {"is_relevant": is_relevant, "retry_count": retry_count + 1}
 
-
 def query_rewriter_node(state: AgentState) -> dict:
-    """Reformulates queries for secondary search attempts upon low relevance."""
+    """Reformulates queries for secondary search attempts."""
     print("\n--- [NODE] Query Rewriter ---")
     question = state.get("question", "")
     retry_count = state.get("retry_count", 1)
 
     llm = get_fast_llm()
     prompt = (
-        f"The initial retrieval attempt for the user question below failed to find relevant documents:\n"
-        f"Question: '{question}'\n\n"
-        "Rewrite this query to be more specific, search-optimized, and rich in domain keywords "
-        "for vector database search. Output ONLY the rewritten query text."
+        f"The initial search for the user request failed:\nRequest: '{question}'\n\n"
+        "Generate a 2-4 word keyword query optimized for email search (e.g., 'recent emails', 'inbox updates').\n"
+        "DO NOT write long sentences, lists of dates, or month names. Output ONLY the short query."
     )
 
     response = llm.invoke(prompt)
-    rewritten_query = response.content.strip()
+    rewritten_query = response.content.strip().replace('"', '')
 
     print(f" -> Rewrote Query (Attempt #{retry_count}): '{rewritten_query}'")
     
