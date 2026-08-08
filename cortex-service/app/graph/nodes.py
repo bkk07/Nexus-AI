@@ -6,7 +6,8 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from app.llm.groq_client import get_fast_llm, get_reasoning_llm
 from app.graph.state import AgentState, SubTask, EvidenceItem
 from app.tools.registry import get_tool
-
+from datetime import datetime
+today = datetime.now().strftime("%A, %B %d, %Y")
 # from app.prompts.intent_prompt import get_intent_prompt;
 
 
@@ -338,19 +339,21 @@ def generator_node(state: AgentState) -> dict:
             context_blocks.append(f"[{idx}] (Source: {source})\n{content}")
         formatted_context = "\n\n".join(context_blocks)
         
-    system_prompt = f"""
-    You are an enterprise RAG assistant.
+    from datetime import datetime
+    today = datetime.now().strftime("%A, %B %d, %Y")
 
-    Your job is to answer the user's question ONLY using the supplied context.
+    from datetime import datetime
+    today = datetime.now().strftime("%A, %B %d, %Y")
+
+    system_prompt = f"""
+    You are an enterprise AI assistant. Today's date is {today}.
+
+    Your job is to answer the user's question using the supplied context. 
 
     Rules:
-    1. Never use outside knowledge.
-    2. Never invent information.
-    3. Never explain your reasoning.
-    4. Never self-correct.
-    5. Produce only the final answer.
-    6. Every factual statement must end with citations like [1] or [2].
-    7. If context is insufficient, reply exactly:
+    1. Base your answer on the provided context. If asked to summarize, provide a concise summary of the items in the context.
+    2. Every factual statement or summary point must end with citations like [1] or [2].
+    3. If the context contains absolutely no information related to the request, reply exactly:
        "I don't have enough information in the provided documents."
 
     Context:
@@ -368,10 +371,25 @@ def generator_node(state: AgentState) -> dict:
     response = llm.invoke(system_prompt)
     answer_text = response.content
     
-    citations = [
-        {"index": idx + 1, "source": item.get("source", "Unknown"), "snippet": item.get("content", "")[:150]}
-        for idx, item in enumerate(ranked_evidence)
-    ]
+    # Define a healthy UI preview length
+    PREVIEW_LENGTH = 350 
+
+    citations = []
+    for idx, item in enumerate(ranked_evidence):
+        full_content = item.get("content", "")
+        
+        # Take the first 350 characters and clean up any messy newlines for the UI
+        snippet = full_content[:PREVIEW_LENGTH].strip()
+        
+        # If the original text is longer than our preview, add an ellipsis
+        if len(full_content) > PREVIEW_LENGTH:
+            snippet += "..."
+            
+        citations.append({
+            "index": idx + 1, 
+            "source": item.get("source", "Unknown"), 
+            "snippet": snippet
+        })
     
     print(" -> Answer generated successfully!")
     
