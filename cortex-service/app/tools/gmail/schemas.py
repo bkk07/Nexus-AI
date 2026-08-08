@@ -17,8 +17,9 @@ class GmailActionType(str, Enum):
     GET_UNREAD_SUMMARY = "get_unread_summary"
     CREATE_DRAFT = "create_draft"
 
+
 class GmailToolArgs(BaseModel):
-    action: GmailActionType
+    action: GmailActionType = Field(default=GmailActionType.SEARCH_EMAILS) 
     query: Optional[str] = None
     thread_id: Optional[str] = None
     to: Optional[List[str]] = None
