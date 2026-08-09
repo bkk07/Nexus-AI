@@ -259,6 +259,47 @@ class GmailConnector:
             ),
             "depth": "FULL_CONTENT",
         }
+    async def count(
+        self,
+        query: str = "",
+    ) -> int:
+        """
+        Count Gmail messages matching the query.
+
+        Uses Gmail metadata/message references only.
+        Does not fetch email content.
+
+        Pagination is handled until all matching
+        messages have been counted.
+        """
+
+        total = 0
+        page_token = None
+
+        while True:
+
+            response = await self._metadata.list_message_refs(
+                query=query,
+                max_results=100,
+                page_token=page_token,
+            )
+
+            messages = response.get(
+                "messages",
+                []
+            )
+
+            total += len(messages)
+
+            page_token = response.get(
+                "nextPageToken"
+            )
+
+            if not page_token:
+                break
+
+        return total
+
 
 
 def build_default_gmail_connector() -> GmailConnector:
