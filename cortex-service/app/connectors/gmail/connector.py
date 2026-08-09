@@ -299,8 +299,81 @@ class GmailConnector:
                 break
 
         return total
+    def filter_emails(
+        self,
+        emails: list[dict[str, Any]],
+        field: str,
+        operator: str,
+        value: str,
+    ) -> list[dict[str, Any]]:
+        """
+        Filter already retrieved email records locally.
 
+        Supported operators:
+            - contains
+            - equals
 
+        Text comparisons are case-insensitive.
+        List fields such as labels support contains/equals.
+        """
+
+        filtered = []
+
+        for email in emails:
+
+            field_value = email.get(field)
+
+            if field_value is None:
+                continue
+
+            # ---------------------------------------------
+            # CONTAINS
+            # ---------------------------------------------
+
+            if operator == "contains":
+
+                if isinstance(field_value, list):
+
+                    matched = any(
+                        str(value).lower()
+                        in str(item).lower()
+                        for item in field_value
+                    )
+
+                else:
+
+                    matched = (
+                        str(value).lower()
+                        in str(field_value).lower()
+                    )
+
+            # ---------------------------------------------
+            # EQUALS
+            # ---------------------------------------------
+
+            elif operator == "equals":
+
+                if isinstance(field_value, list):
+
+                    matched = value in field_value
+
+                else:
+
+                    matched = (
+                        str(field_value).lower()
+                        == str(value).lower()
+                    )
+
+            else:
+
+                raise ValueError(
+                    f"Unsupported filter operator: {operator}"
+                )
+
+            if matched:
+                filtered.append(email)
+
+        return filtered
 
 def build_default_gmail_connector() -> GmailConnector:
 
