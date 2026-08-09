@@ -375,6 +375,100 @@ class GmailConnector:
 
         return filtered
 
+    def classify_email(
+        self,
+        email: dict[str, Any],
+    ) -> dict[str, str]:
+        """
+        Classify an email using deterministic rules.
+
+        Returns:
+            category
+            confidence
+        """
+
+        subject = email.get(
+            "subject",
+            ""
+        ).lower()
+
+        snippet = email.get(
+            "snippet",
+            ""
+        ).lower()
+
+        text = f"{subject} {snippet}"
+
+        if "interview" in text:
+            return {
+                "category": "interview",
+                "confidence": "high",
+            }
+
+        if (
+            "rejected" in text
+            or "regret" in text
+        ):
+            return {
+                "category": "rejection",
+                "confidence": "high",
+            }
+
+        if (
+            "application" in text
+            or "job" in text
+        ):
+            return {
+                "category": "job",
+                "confidence": "medium",
+            }
+
+        if (
+            "unsubscribe" in text
+            or "offer" in text
+        ):
+            return {
+                "category": "promotion",
+                "confidence": "medium",
+            }
+
+        return {
+            "category": "other",
+            "confidence": "low",
+        }
+
+    def classify_emails(
+        self,
+        emails: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """
+        Classify a collection of already retrieved emails.
+        """
+
+        results = []
+
+        for email in emails:
+
+            classification = self.classify_email(
+                email
+            )
+
+            results.append(
+                {
+                    **email,
+                    "classification": classification[
+                        "category"
+                    ],
+                    "classification_confidence": (
+                        classification[
+                            "confidence"
+                        ]
+                    ),
+                }
+            )
+
+        return results
+    
 def build_default_gmail_connector() -> GmailConnector:
 
     gmail_service = GmailService()
