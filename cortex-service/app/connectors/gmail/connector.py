@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+import re
 import base64
 from typing import Any
 
@@ -468,6 +468,53 @@ class GmailConnector:
             )
 
         return results
+
+    def extract_information(
+        self,
+        email: dict[str, Any],
+        fields: list[str],
+    ) -> dict[str, list[str]]:
+        """
+        Extract structured information from an email.
+
+        Supported fields:
+            - emails
+            - urls
+            - phones
+
+        This version works on the email data already available.
+        """
+
+        text = " ".join(
+            [
+                email.get("from", ""),
+                email.get("to", ""),
+                email.get("subject", ""),
+                email.get("snippet", ""),
+            ]
+        )
+
+        result: dict[str, list[str]] = {}
+
+        if "emails" in fields:
+            result["emails"] = re.findall(
+                r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",
+                text,
+            )
+
+        if "urls" in fields:
+            result["urls"] = re.findall(
+                r"https?://[^\s]+",
+                text,
+            )
+
+        if "phones" in fields:
+            result["phones"] = re.findall(
+                r"\+?\d[\d\s().-]{7,}\d",
+                text,
+            )
+
+        return result
     
 def build_default_gmail_connector() -> GmailConnector:
 
