@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import base64
 from typing import Any
 
+from app.connectors.gmail.content_client import (
+    GmailContentClient,
+)
 from app.connectors.gmail.metadata_client import (
     GmailMetadataClient,
 )
-
 from app.tools.gmail.service import GmailService
 
 
@@ -16,10 +19,10 @@ class GmailConnector:
     Currently implemented:
 
         SEARCH
+        FETCH
 
     Future operations:
 
-        FETCH
         COUNT
         AGGREGATE
         FILTER
@@ -40,6 +43,10 @@ class GmailConnector:
             gmail_service
         )
 
+        self._content = GmailContentClient(
+            gmail_service
+        )
+
     async def search(
         self,
         query: str = "",
@@ -48,14 +55,8 @@ class GmailConnector:
         """
         Search Gmail and return metadata + snippet.
 
-        IMPORTANT:
-
         This method does NOT fetch full email bodies.
         """
-
-        # ---------------------------------------------
-        # 1. Gmail search
-        # ---------------------------------------------
 
         response = await self._metadata.list_message_refs(
             query=query,
@@ -66,10 +67,6 @@ class GmailConnector:
             "messages",
             []
         )
-
-        # ---------------------------------------------
-        # 2. Fetch lightweight metadata
-        # ---------------------------------------------
 
         results = []
 
@@ -85,34 +82,183 @@ class GmailConnector:
             results.append(
                 {
                     "id": record.id,
-
                     "thread_id": record.thread_id,
-
                     "from": record.headers.get(
                         "From"
                     ),
-
                     "to": record.headers.get(
                         "To"
                     ),
-
                     "subject": record.headers.get(
                         "Subject"
                     ),
-
                     "date": record.headers.get(
                         "Date"
                     ),
-
                     "snippet": record.snippet,
-
                     "labels": record.label_ids,
-
                     "depth": "SNIPPET",
                 }
             )
 
         return results
+
+    def _decode_body(
+        self,
+        data: str,
+    ) -> str:
+
+        decoded = base64.urlsafe_b64decode(
+            data.encode("UTF-8")
+        )
+
+        return decoded.decode(
+            "utf-8",
+            errors="replace",
+        )
+
+    def _collect_text_parts(
+        self,
+        payload: dict,
+    ) -> tuple[list[str], list[str]]:
+
+        plain_parts = []
+        html_parts = []
+
+        mime_type = payload.get(
+            "mimeType"
+        )
+
+        data = payload.get(
+            "body",
+            {}
+        ).get("data")
+
+        if data:
+
+            if mime_type == "text/plain":
+
+                plain_parts.append(
+                    self._decode_body(data)
+                )
+
+            elif mime_type == "text/html":
+
+                html_parts.append(
+                    self._decode_body(data)
+                )
+
+        for part in payload.get(
+            "parts",
+            []
+        ):
+
+            plain, html = (
+                self._collect_text_parts(
+                    part
+                )
+            )
+
+            plain_parts.extend(plain)
+            html_parts.extend(html)
+
+        return plain_parts, html_parts
+
+    def _extract_body(
+        self,
+        payload: dict,
+    ) -> tuple[str, str | None]:
+
+        plain_parts, html_parts = (
+            self._collect_text_parts(
+                payload
+            )
+        )
+
+        if plain_parts:
+
+            return (
+                "\n\n".join(plain_parts),
+                "text/plain",
+            )
+
+        if html_parts:
+
+            return (
+                "\n\n".join(html_parts),
+                "text/html",
+            )
+
+        return "", None
+
+    async def fetch(
+        self,
+        message_id: str,
+    ) -> dict[str, Any]:
+        """
+        Fetch one Gmail message with full content.
+        """
+
+        raw_message = (
+            await self._content.get_message(
+                message_id
+            )
+        )
+
+        payload = raw_message.get(
+            "payload",
+            {}
+        )
+
+        headers = {}
+
+        for header in payload.get(
+            "headers",
+            []
+        ):
+
+            name = header.get("name")
+            value = header.get(
+                "value",
+                ""
+            )
+
+            if name:
+                headers[name.lower()] = value
+
+        body, body_type = self._extract_body(
+            payload
+        )
+
+        return {
+            "id": raw_message["id"],
+            "thread_id": raw_message.get(
+                "threadId"
+            ),
+            "from": headers.get(
+                "from"
+            ),
+            "to": headers.get(
+                "to"
+            ),
+            "subject": headers.get(
+                "subject"
+            ),
+            "date": headers.get(
+                "date"
+            ),
+            "snippet": raw_message.get(
+                "snippet",
+                ""
+            ),
+            "body": body,
+            "body_type": body_type,
+            "labels": raw_message.get(
+                "labelIds",
+                []
+            ),
+            "depth": "FULL_CONTENT",
+        }
 
 
 def build_default_gmail_connector() -> GmailConnector:

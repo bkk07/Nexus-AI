@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 from app.tools.gmail.service import GmailService
 
 
 class GmailContentClient:
     """
-    Full-content Gmail client.
+    Gmail full-content API client.
 
-    Used by FETCH.
-
-    Unlike GmailMetadataClient, this client is allowed
-    to retrieve the complete email payload.
+    Responsible only for retrieving the raw
+    full Gmail message.
     """
 
     def __init__(
@@ -24,11 +23,10 @@ class GmailContentClient:
     async def get_message(
         self,
         message_id: str,
-    ) -> dict:
+    ) -> dict[str, Any]:
 
         def _request():
-
-            request = (
+            return (
                 self._gmail_service.service
                 .users()
                 .messages()
@@ -37,10 +35,7 @@ class GmailContentClient:
                     id=message_id,
                     format="full",
                 )
+                .execute()
             )
 
-            return request.execute()
-
-        return await asyncio.to_thread(
-            _request
-        )
+        return await asyncio.to_thread(_request)
