@@ -6,7 +6,8 @@ import os
 from typing import Any, Dict, List, Optional
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import Resource, build
-
+from dotenv import load_dotenv
+load_dotenv()
 from app.tools.gmail.schemas import EmailMessage
 
 logger = logging.getLogger(__name__)

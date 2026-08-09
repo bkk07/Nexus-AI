@@ -1,17 +1,30 @@
-venv/
+# Python virtual environment
+.venv/
 
+# Python cache
 __pycache__/
+*.py[cod]
+*$py.class
 
-*.pyc
-
+# Environment / secrets
 .env
+.env.*
 
+# Pytest
 .pytest_cache/
 
+# IDEs
 .idea/
-
 .vscode/
 
+# Coverage
 .coverage
-
 htmlcov/
+
+# Build / distribution
+build/
+dist/
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/

@@ -1,15 +1,41 @@
 """Shared Pydantic schemas for the Gmail integration tool."""
 
-from pydantic import BaseModel, Field
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
+
 
 class EvidenceItem(BaseModel):
     content: str
     source: str
     score: float = Field(ge=0.0, le=1.0)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict
+    )
+
+
+class EmailMessage(BaseModel):
+    id: str
+    thread_id: str
+
+    subject: str = "(No Subject)"
+    sender: str = ""
+    recipient: str = ""
+    date: str = ""
+
+    snippet: str = ""
+    body: str = ""
+
+    is_unread: bool = False
+    is_starred: bool = False
+
+    has_attachments: bool = False
+    attachment_names: List[str] = Field(
+        default_factory=list
+    )
+
 
 class GmailActionType(str, Enum):
     SEARCH_EMAILS = "search_emails"
@@ -19,13 +45,22 @@ class GmailActionType(str, Enum):
 
 
 class GmailToolArgs(BaseModel):
-    action: GmailActionType = Field(default=GmailActionType.SEARCH_EMAILS) 
+    action: GmailActionType = Field(
+        default=GmailActionType.SEARCH_EMAILS
+    )
+
     query: Optional[str] = None
     thread_id: Optional[str] = None
+
     to: Optional[List[str]] = None
     subject: Optional[str] = None
     body: Optional[str] = None
-    max_results: int = Field(default=10, le=50)
+
+    max_results: int = Field(
+        default=10,
+        le=50
+    )
+
 
 class DraftResult(BaseModel):
     draft_id: str
