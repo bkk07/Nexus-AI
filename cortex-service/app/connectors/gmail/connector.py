@@ -1,4 +1,5 @@
 from __future__ import annotations
+import logging
 import re
 import base64
 from typing import Any
@@ -10,6 +11,9 @@ from app.connectors.gmail.metadata_client import (
     GmailMetadataClient,
 )
 from app.tools.gmail.service import GmailService
+
+
+logger = logging.getLogger(__name__)
 
 
 class GmailConnector:
@@ -58,6 +62,12 @@ class GmailConnector:
         This method does NOT fetch full email bodies.
         """
 
+        logger.debug(
+            "[GMAIL_SEARCH] query=%s requested_top_k=%s",
+            query,
+            top_k,
+        )
+
         response = await self._metadata.list_message_refs(
             query=query,
             max_results=top_k,
@@ -66,6 +76,11 @@ class GmailConnector:
         message_refs = response.get(
             "messages",
             []
+        )
+
+        logger.debug(
+            "[GMAIL_SEARCH] message_refs_returned=%s",
+            len(message_refs),
         )
 
         results = []
@@ -100,6 +115,11 @@ class GmailConnector:
                     "depth": "SNIPPET",
                 }
             )
+
+        logger.debug(
+            "[GMAIL_SEARCH] final_result_count=%s",
+            len(results),
+        )
 
         return results
 
@@ -199,6 +219,11 @@ class GmailConnector:
         Fetch one Gmail message with full content.
         """
 
+        logger.debug(
+            "[GMAIL_FETCH] fetching_message_id=%s",
+            message_id,
+        )
+
         raw_message = (
             await self._content.get_message(
                 message_id
@@ -228,6 +253,13 @@ class GmailConnector:
 
         body, body_type = self._extract_body(
             payload
+        )
+
+        logger.debug(
+            "[GMAIL_FETCH] message_id=%s body_type=%s body_length=%s",
+            raw_message.get("id", message_id),
+            body_type,
+            len(body) if isinstance(body, str) else 0,
         )
 
         return {
@@ -275,8 +307,19 @@ class GmailConnector:
 
         total = 0
         page_token = None
+        page_number = 0
 
         while True:
+
+            page_number += 1
+
+            logger.debug(
+                "[GMAIL_COUNT] query=%s page_number=%s page_size=%s page_token_present=%s",
+                query,
+                page_number,
+                100,
+                page_token is not None,
+            )
 
             response = await self._metadata.list_message_refs(
                 query=query,
@@ -289,6 +332,13 @@ class GmailConnector:
                 []
             )
 
+            logger.debug(
+                "[GMAIL_COUNT] query=%s page_number=%s page_result_count=%s",
+                query,
+                page_number,
+                len(messages),
+            )
+
             total += len(messages)
 
             page_token = response.get(
@@ -297,6 +347,13 @@ class GmailConnector:
 
             if not page_token:
                 break
+
+        logger.debug(
+            "[GMAIL_COUNT] query=%s total=%s pages=%s",
+            query,
+            total,
+            page_number,
+        )
 
         return total
     def filter_emails(
@@ -316,6 +373,14 @@ class GmailConnector:
         Text comparisons are case-insensitive.
         List fields such as labels support contains/equals.
         """
+
+        logger.debug(
+            "[GMAIL_FILTER] email_count=%s field=%s operator=%s value_present=%s",
+            len(emails),
+            field,
+            operator,
+            bool(value),
+        )
 
         filtered = []
 
@@ -372,6 +437,11 @@ class GmailConnector:
 
             if matched:
                 filtered.append(email)
+
+        logger.debug(
+            "[GMAIL_FILTER] filtered_count=%s",
+            len(filtered),
+        )
 
         return filtered
 
@@ -445,6 +515,11 @@ class GmailConnector:
         Classify a collection of already retrieved emails.
         """
 
+        logger.debug(
+            "[GMAIL_CLASSIFY] email_count=%s",
+            len(emails),
+        )
+
         results = []
 
         for email in emails:
@@ -467,6 +542,11 @@ class GmailConnector:
                 }
             )
 
+        logger.debug(
+            "[GMAIL_CLASSIFY] classified_count=%s",
+            len(results),
+        )
+
         return results
 
     def extract_information(
@@ -484,6 +564,12 @@ class GmailConnector:
 
         This version works on the email data already available.
         """
+
+        logger.debug(
+            "[GMAIL_EXTRACT] requested_fields=%s email_id=%s",
+            fields,
+            email.get("id"),
+        )
 
         text = " ".join(
             [
@@ -513,6 +599,11 @@ class GmailConnector:
                 r"\+?\d[\d\s().-]{7,}\d",
                 text,
             )
+
+        logger.debug(
+            "[GMAIL_EXTRACT] extracted_keys=%s",
+            list(result.keys()),
+        )
 
         return result
     

@@ -19,3 +19,5 @@ google-auth-httplib2
 fastapi
 uvicorn[standard]
 cryptography
+pytest
+pytest-asyncio

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass, field
 
 from app.tools.gmail.service import GmailService
@@ -12,6 +13,9 @@ GMAIL_METADATA_HEADERS = [
     "Subject",
     "Date",
 ]
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -59,6 +63,13 @@ class GmailMetadataClient:
         page_token: str | None = None,
     ) -> dict:
 
+        logger.debug(
+            "[GMAIL_METADATA] list_message_refs query=%s max_results=%s page_token_present=%s",
+            query,
+            max_results,
+            page_token is not None,
+        )
+
         def _request():
 
             request = (
@@ -75,9 +86,20 @@ class GmailMetadataClient:
 
             return request.execute()
 
-        return await asyncio.to_thread(
+        response = await asyncio.to_thread(
             _request
         )
+
+        messages = response.get("messages", [])
+
+        logger.debug(
+            "[GMAIL_METADATA] returned_messages=%s next_page_token_present=%s result_size_estimate=%s",
+            len(messages),
+            response.get("nextPageToken") is not None,
+            response.get("resultSizeEstimate"),
+        )
+
+        return response
 
     async def get_message_metadata(
         self,
