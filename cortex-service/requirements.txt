@@ -21,3 +21,6 @@ uvicorn[standard]
 cryptography
 pytest
 pytest-asyncio
+google-auth-oauthlib 
+google-api-python-client
+tzdata

@@ -28,3 +28,14 @@ dist/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Environment variables
+.env
+.env.*
+
+# Google OAuth credentials
+credentials.json
+google_token.json
+
+# All JSON files
+*.json
