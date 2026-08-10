@@ -53,3 +53,5 @@ notebooks/*.ipynb
 credentials.json
 google_token.json
 token.json
+# Local archives
+*.zip
