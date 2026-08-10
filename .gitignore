@@ -39,3 +39,17 @@ google_token.json
 
 # All JSON files
 *.json
+# Local notebooks
+notebooks/*.ipynb
+# Local notebooks
+notebooks/*.ipynb
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Google OAuth credentials/tokens
+credentials.json
+google_token.json
+token.json
