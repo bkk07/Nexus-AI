@@ -2,10 +2,34 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.core.operations import OperationType
 from app.llm.groq_client import get_fast_llm
+
+
+class GmailQueryConstraints(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    sender: str | None = None
+    recipient: str | None = None
+    cc: str | None = None
+    bcc: str | None = None
+    unread: bool | None = None
+    read: bool | None = None
+    starred: bool | None = None
+    important: bool | None = None
+    inbox: bool | None = None
+    sent: bool | None = None
+    trash: bool | None = None
+    spam: bool | None = None
+    subject: str | None = None
+    keyword: str | None = None
+    has_attachment: bool | None = None
+    attachment_type: str | None = None
+    time_range: str | None = None
+    after_date: str | None = None
+    before_date: str | None = None
 
 
 class PlannedOperation(BaseModel):
@@ -20,13 +44,13 @@ class PlannedOperation(BaseModel):
         )
     )
 
-    parameters: dict[str, Any] = Field(
+    parameters: dict[str, Any] | GmailQueryConstraints = Field(
         default_factory=dict,
         description=(
             "Connector-specific parameters. "
             "For Gmail SEARCH/COUNT/AGGREGATE operations, "
-            "'query' MUST be a valid Gmail search query, "
-            "not the user's natural-language question. "
+            "use semantic GmailQueryConstraints fields instead of "
+            "Gmail query syntax. "
             "Do not include depends_on here."
         )
     )
@@ -38,6 +62,23 @@ class PlannedOperation(BaseModel):
             "this operation depends on."
         )
     )
+
+    @model_validator(mode="after")
+    def _normalize_gmail_parameters(self):
+        if self.connector == "gmail" and not isinstance(
+            self.parameters,
+            GmailQueryConstraints,
+        ):
+            if isinstance(self.parameters, BaseModel):
+                self.parameters = GmailQueryConstraints.model_validate(
+                    self.parameters.model_dump(exclude_none=True)
+                )
+            else:
+                self.parameters = GmailQueryConstraints.model_validate(
+                    self.parameters
+                )
+
+        return self
 
 
 class OperationPlanResponse(BaseModel):
@@ -91,38 +132,69 @@ AVAILABLE CONNECTORS
 IMPORTANT GMAIL QUERY RULE
 ============================================================
 
-When using the Gmail connector, the "query" parameter MUST
-be a valid Gmail search query.
+When using the Gmail connector, do NOT generate Gmail query
+syntax in the planner output.
 
-NEVER put the user's natural-language question directly
-into parameters["query"].
+For Gmail SEARCH, COUNT, and AGGREGATE operations, extract
+semantic Gmail constraints only.
 
-Extract ALL meaningful constraints from the user's request
-and convert them into Gmail search operators.
+Use these fields when they apply:
 
-The query should contain every relevant constraint that can
-be represented by Gmail search syntax.
+- sender
+- recipient
+- cc
+- bcc
+- unread
+- read
+- starred
+- important
+- inbox
+- sent
+- trash
+- spam
+- subject
+- keyword
+- has_attachment
+- attachment_type
+- time_range
+- after_date
+- before_date
+
+The query compiler will convert these constraints into Gmail
+search syntax later.
+
+NEVER put the user's natural-language question directly into
+parameters.
+
+Supported time_range values include:
+
+- today
+- yesterday
+- this_week
+- this_month
+- last_week
+- last_month
 
 ============================================================
 GMAIL SENDER / FROM RULES
 ============================================================
 
 If the user asks for emails FROM a person, company, or sender,
-use the Gmail "from:" operator.
+set the semantic sender field.
 
 Examples:
 
 "emails from Microsoft"
--> from:(microsoft)
+-> sender: "microsoft"
 
 "emails from Google"
--> from:(google)
+-> sender: "google"
 
 "emails from Amazon"
--> from:(amazon)
+-> sender: "amazon"
 
 "emails from John"
--> from:(john)
+-> sender: "john"
 
 If the user makes a common spelling mistake in a company/person
 name, infer the intended entity when the meaning is clear.
@@ -130,7 +202,7 @@ name, infer the intended entity when the meaning is clear.
 For example:
 
 "emails from Microsft"
--> from:(microsoft)
+-> sender: "microsoft"
 
 Do NOT discard the sender constraint.
 
@@ -138,49 +210,20 @@ Do NOT discard the sender constraint.
 GMAIL DATE RULES
 ============================================================
 
-Convert natural-language time constraints into Gmail date
-operators.
+Convert natural-language time constraints into semantic values
+such as "today" and "this_week".
 
-"today"
--> use today's date boundary
+Do NOT generate Gmail date syntax in the planner output.
 
-"yesterday"
--> use yesterday's date range
-
-"this week"
--> use the beginning of the current week as the lower bound
-
-"this month"
--> use the beginning of the current month as the lower bound
-
-"last week"
--> use the previous week's date range
-
-"last month"
--> use the previous month's date range
-
-Use valid Gmail date syntax such as:
-
-after:YYYY/MM/DD
-before:YYYY/MM/DD
-
-or Gmail's supported relative date operators when appropriate.
-
-IMPORTANT:
-
-Do NOT invent a fixed date.
-
-The date must be calculated from the CURRENT DATE supplied
-by the application/runtime.
-
-If the application provides the current date, use it.
+The application will compile the semantic value using the
+actual runtime date.
 
 ============================================================
 COMBINING GMAIL CONSTRAINTS
 ============================================================
 
 When multiple constraints are present, combine them into
-ONE Gmail query.
+ONE semantic Gmail constraint object.
 
 Example:
 
@@ -192,17 +235,13 @@ Correct:
 COUNT
 connector: gmail
 parameters:
-    query: "from:(microsoft) after:YYYY/MM/DD"
+    sender: "microsoft"
+    time_range: "today"
 
-where YYYY/MM/DD is today's date boundary.
+DO NOT return query syntax such as:
 
-DO NOT return:
-
-query: "in:anywhere"
-
-DO NOT return:
-
-query: "how many emails did I get from Microsoft today?"
+- query: "in:anywhere"
+- query: "from:(microsoft) after:2026/08/10"
 
 ============================================================
 COUNT
@@ -215,6 +254,7 @@ COUNT must be used when the user asks:
 - count
 - how many times
 - total number
+- how many emails
 
 COUNT should normally be exactly ONE operation.
 
@@ -225,34 +265,35 @@ User:
 
 -> COUNT
 -> gmail
--> query: "is:unread"
+-> parameters:
+    unread: true
 
 User:
 "How many emails did I get from Microsoft today?"
 
 -> COUNT
 -> gmail
--> query containing:
-   from:(microsoft)
-   AND today's date constraint
+-> parameters:
+    sender: "microsoft"
+    time_range: "today"
 
 User:
 "How many unread emails from Microsoft this week?"
 
 -> COUNT
 -> gmail
--> query containing:
-   is:unread
-   from:(microsoft)
-   AND this week's date constraint
+-> parameters:
+    sender: "microsoft"
+    unread: true
+    time_range: "this_week"
 
 User:
 "How many interview emails did I receive?"
 
 -> COUNT
 -> gmail
--> query containing:
-   interview
+-> parameters:
+    keyword: "interview"
 
 Do NOT add SEARCH or FETCH for COUNT unless the user
 explicitly asks for the actual emails as well.
@@ -267,6 +308,8 @@ Use SEARCH for:
 - search
 - show me emails
 - list emails
+- get emails
+- filter emails
 
 Example:
 
@@ -274,19 +317,20 @@ Example:
 
 -> SEARCH
 -> gmail
--> query: "from:(microsoft)"
--> top_k: 20
+-> parameters:
+    sender: "microsoft"
 
 Example:
 
-"Find unread Microsoft emails this week"
+"Filter job related emails today"
 
 -> SEARCH
 -> gmail
--> query containing:
-   is:unread
-   from:(microsoft)
-   current-week date constraint
+-> parameters:
+    keyword: "job"
+    time_range: "today"
+
+IMPORTANT: "Filter Job Related Emails today" MUST NOT become COUNT merely because the word "emails" appears. Use SEARCH for retrieving matching Gmail messages.
 
 SEARCH alone is sufficient when the user only wants
 matching emails.
@@ -331,7 +375,8 @@ generate:
 
 1. SEARCH
    connector: gmail
-   query: "from:(microsoft)"
+    parameters:
+         sender: "microsoft"
    top_k: 1
 
 2. FETCH
@@ -387,9 +432,11 @@ AGGREGATE
 Use AGGREGATE for questions such as:
 
 - Who emailed me most this week?
-- Which sender emailed me the most?
+- Which sender emailed me most?
+- Which company sent the most emails?
 - Give me a breakdown by sender.
-- Which company sent me the most emails?
+- Group emails by sender.
+- most frequent sender
 
 For:
 
@@ -401,7 +448,7 @@ AGGREGATE
 connector: gmail
 
 parameters:
-    query: "<current-week Gmail query>"
+    time_range: "this_week"
 
 Do not generate:
 
@@ -458,9 +505,9 @@ For example:
 MUST preserve BOTH:
 
 sender = Microsoft
-date = today
+time_range = today
 
-The resulting Gmail query MUST contain both constraints.
+The planner output must preserve both constraints.
 
 Do not discard information from the user's question.
 

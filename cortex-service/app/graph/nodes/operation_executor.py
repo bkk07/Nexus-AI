@@ -403,6 +403,32 @@ async def operation_executor_node(
                 ] = extracted
 
             # --------------------------------------------------
+            # AGGREGATE
+            # --------------------------------------------------
+
+            elif operation_type == OperationType.AGGREGATE:
+
+                query = operation.parameters.get(
+                    "query",
+                    "",
+                )
+
+                logger.debug("[OPERATION_EXECUTOR] AGGREGATE QUERY: %s", query)
+
+                aggregate_result = await gmail.aggregate(
+                    query=query,
+                )
+
+                logger.debug(
+                    "[OPERATION_EXECUTOR] AGGREGATE RESULT: %s",
+                    aggregate_result,
+                )
+
+                operation_results[
+                    operation_type.value.lower()
+                ] = aggregate_result
+
+            # --------------------------------------------------
             # SUMMARIZE
             # --------------------------------------------------
 

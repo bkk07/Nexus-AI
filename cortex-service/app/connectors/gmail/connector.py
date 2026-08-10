@@ -606,6 +606,73 @@ class GmailConnector:
         )
 
         return result
+
+    async def aggregate(
+        self,
+        query: str = "",
+    ) -> dict[str, Any]:
+        """
+        Aggregate emails by sender without fetching full bodies.
+        """
+        from collections import Counter
+        import re
+
+        logger.debug("[GMAIL_AGGREGATE] query=%s", query)
+        
+        page_token = None
+        message_refs = []
+
+        while True:
+            response = await self._metadata.list_message_refs(
+                query=query,
+                max_results=100,
+                page_token=page_token,
+            )
+            messages = response.get("messages", [])
+            message_refs.extend(messages)
+            
+            page_token = response.get("nextPageToken")
+            if not page_token:
+                break
+                
+        logger.debug("[GMAIL_AGGREGATE] found %s message_refs", len(message_refs))
+
+        message_ids = [ref["id"] for ref in message_refs]
+        
+        metadata_map, failed_messages = await self._metadata.get_messages_metadata_batch(
+            message_ids=message_ids,
+            headers=["From"],
+        )
+        
+        matched_messages = len(message_ids)
+        processed_messages = len(metadata_map)
+        
+        counts = Counter()
+        for msg_id, record in metadata_map.items():
+            from_header = record.headers.get("From", "")
+            match = re.search(r'<([^>]+)>', from_header)
+            if match:
+                sender = match.group(1).lower().strip()
+            else:
+                sender = from_header.lower().strip()
+                
+            if sender:
+                counts[sender] += 1
+                
+        top_sender = None
+        top_count = 0
+        if counts:
+            top_sender, top_count = counts.most_common(1)[0]
+            
+        return {
+            "counts": dict(counts),
+            "top_sender": top_sender,
+            "top_count": top_count,
+            "matched_messages": matched_messages,
+            "processed_messages": processed_messages,
+            "failed_messages": failed_messages,
+            "partial": failed_messages > 0,
+        }
     
 def build_default_gmail_connector() -> GmailConnector:
 

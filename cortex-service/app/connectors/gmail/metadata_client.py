@@ -158,3 +158,70 @@ class GmailMetadataClient:
                 ""
             ),
         )
+
+    async def get_messages_metadata_batch(
+        self,
+        message_ids: list[str],
+        headers: list[str] | None = None,
+    ) -> tuple[dict[str, GmailMetadataRecord], int]:
+        
+        if not message_ids:
+            return {}, 0
+            
+        metadata_headers = headers or GMAIL_METADATA_HEADERS
+        
+        metadata_map: dict[str, GmailMetadataRecord] = {}
+        failed_count = 0
+        
+        def _request_chunk(chunk_ids):
+            chunk_map = {}
+            chunk_failures = 0
+            
+            def _callback(request_id, response, exception):
+                nonlocal chunk_failures
+                if exception is not None:
+                    logger.warning("[GMAIL_METADATA_BATCH] Failed to fetch metadata for %s: %s", request_id, exception)
+                    chunk_failures += 1
+                else:
+                    payload = response.get("payload", {})
+                    response_headers = {
+                        header["name"]: header.get("value", "")
+                        for header in payload.get("headers", [])
+                        if "name" in header
+                    }
+                    
+                    record = GmailMetadataRecord(
+                        id=response["id"],
+                        thread_id=response.get("threadId"),
+                        headers=response_headers,
+                        label_ids=response.get("labelIds", []),
+                        snippet=response.get("snippet", ""),
+                    )
+                    chunk_map[request_id] = record
+                    
+            batch = self._gmail_service.service.new_batch_http_request(callback=_callback)
+            for msg_id in chunk_ids:
+                request = self._gmail_service.service.users().messages().get(
+                    userId="me",
+                    id=msg_id,
+                    format="metadata",
+                    metadataHeaders=metadata_headers,
+                )
+                batch.add(request, request_id=msg_id)
+                
+            batch.execute()
+            return chunk_map, chunk_failures
+            
+        chunk_size = 100
+        
+        def _execute_all():
+            nonlocal failed_count
+            for i in range(0, len(message_ids), chunk_size):
+                chunk_ids = message_ids[i:i + chunk_size]
+                chunk_map, chunk_failures = _request_chunk(chunk_ids)
+                metadata_map.update(chunk_map)
+                failed_count += chunk_failures
+                
+        await asyncio.to_thread(_execute_all)
+        
+        return metadata_map, failed_count

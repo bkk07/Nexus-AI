@@ -1,4 +1,5 @@
 from app.core.operation_planner import (
+    GmailQueryConstraints,
     OperationPlanResponse,
     PlannedOperation,
     generate_operation_plan,
@@ -6,7 +7,7 @@ from app.core.operation_planner import (
 from app.core.operations import OperationType
 
 
-def test_unread_count_plan(monkeypatch):
+def test_microsoft_today_plan(monkeypatch):
 
     class FakeStructuredLLM:
 
@@ -17,9 +18,10 @@ def test_unread_count_plan(monkeypatch):
                     PlannedOperation(
                         operation=OperationType.COUNT,
                         connector="gmail",
-                        parameters={
-                            "query": "is:unread"
-                        },
+                        parameters=GmailQueryConstraints(
+                            sender="microsoft",
+                            time_range="today",
+                        ),
                     )
                 ]
             )
@@ -35,7 +37,7 @@ def test_unread_count_plan(monkeypatch):
     )
 
     plan = generate_operation_plan(
-        "How many unread emails do I have?"
+        "How many emails did I get from Microsoft today?"
     )
 
     operation = plan.operations[0]
@@ -47,7 +49,6 @@ def test_unread_count_plan(monkeypatch):
 
     assert operation.connector == "gmail"
 
-    assert (
-        operation.parameters["query"]
-        == "is:unread"
-    )
+    assert operation.parameters.sender == "microsoft"
+
+    assert operation.parameters.time_range == "today"
