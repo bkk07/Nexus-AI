@@ -2,7 +2,7 @@ from __future__ import annotations
 from enum import Enum
 from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
-
+from typing import Literal
 
 class CalendarOperation(str, Enum):
     SEARCH = "SEARCH"
@@ -148,3 +148,91 @@ class RankedSlot(BaseModel):
     reasons: list[str] = Field(default_factory=list)
 
 
+class CalendarCreateRequest(BaseModel):
+    """
+    Normalized representation of a calendar event creation request.
+
+    This model represents application-level intent.
+    It does not contain Google Calendar API parameters.
+    """
+
+    title: str
+
+    start: datetime
+
+    end: datetime
+
+    location: str | None = None
+
+    description: str | None = None
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(
+        cls,
+        value: str,
+    ) -> str:
+
+        value = value.strip()
+
+        if not value:
+            raise ValueError(
+                "Event title cannot be empty."
+            )
+
+        return value
+
+    @field_validator("end")
+    @classmethod
+    def validate_end(
+        cls,
+        value: datetime,
+        info,
+    ) -> datetime:
+
+        start = info.data.get("start")
+
+        if start is not None and value <= start:
+            raise ValueError(
+                "Event end must be after event start."
+            )
+
+        return value
+
+    @field_validator("location", "description")
+    @classmethod
+    def normalize_optional_strings(
+        cls,
+        value: str | None,
+    ) -> str | None:
+
+        if value is None:
+            return None
+
+        value = value.strip()
+
+        return value or None
+
+class CreateOutcome(BaseModel):
+    """
+    Result of a safe calendar creation attempt.
+
+    The status explains exactly why creation did or did not occur.
+    """
+
+    status: Literal[
+        "created",
+        "duplicate_blocked",
+        "conflict_blocked",
+        "invalid",
+    ]
+
+    event: EventSummary | None = None
+
+    existing_duplicate: EventSummary | None = None
+
+    conflicts: list[EventSummary] = Field(
+        default_factory=list,
+    )
+
+    message: str

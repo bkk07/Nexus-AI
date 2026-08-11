@@ -18,3 +18,16 @@ class CalendarClient(Protocol):
         query: dict[str, Any],
     ) -> list[EventSummary]:
         ...
+
+    def create_event(
+        self,
+        event: EventSummary,
+    ) -> EventSummary:
+        ...
+
+
+    def delete_event(
+        self,
+        event_id: str,
+    ) -> None:
+        ...

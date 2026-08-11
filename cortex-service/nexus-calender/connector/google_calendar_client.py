@@ -101,6 +101,61 @@ class GoogleCalendarClient:
                 cause=exc,
             ) from exc
 
+    def create_event(
+        self,
+        event: EventSummary,
+    ) -> EventSummary:
+
+        try:
+
+            body = {
+                "summary": event.title,
+
+                "start": {
+                    "dateTime": event.start.isoformat(),
+                    "timeZone": str(
+                        event.start.tzinfo
+                    ),
+                },
+
+                "end": {
+                    "dateTime": event.end.isoformat(),
+                    "timeZone": str(
+                        event.end.tzinfo
+                    ),
+                },
+            }
+
+            if event.location:
+                body["location"] = event.location
+
+            if event.description:
+                body["description"] = event.description
+
+            response = (
+                self.service
+                .events()
+                .insert(
+                    calendarId=self.calendar_id,
+                    body=body,
+                )
+                .execute()
+            )
+
+            return self._normalize_event(
+                response
+            )
+
+        except CalendarConnectorError:
+            raise
+
+        except Exception as exc:
+
+            raise CalendarConnectorError(
+                "Google Calendar event creation failed.",
+                cause=exc,
+            ) from exc
+
     @staticmethod
     def _normalize_event(
         event: dict[str, Any],
@@ -180,3 +235,30 @@ class GoogleCalendarClient:
             )
 
         return None
+
+    def delete_event(
+        self,
+        event_id: str,
+    ) -> None:
+
+        try:
+
+            (
+                self.service
+                .events()
+                .delete(
+                    calendarId=self.calendar_id,
+                    eventId=event_id,
+                )
+                .execute()
+            )
+
+        except CalendarConnectorError:
+            raise
+
+        except Exception as exc:
+
+            raise CalendarConnectorError(
+                "Google Calendar event deletion failed.",
+                cause=exc,
+            ) from exc
