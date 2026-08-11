@@ -1,7 +1,6 @@
 from __future__ import annotations
-
 from enum import Enum
-
+from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -77,3 +76,24 @@ class CalendarRequest(BaseModel):
         value = value.strip()
 
         return value or None
+
+
+class CalendarEvent(BaseModel):
+    """
+    Normalized representation of a Google Calendar event.
+
+    This is our application's representation.
+    It is NOT the raw Google Calendar API response.
+    """
+
+    event_id: str
+    summary: str | None = None
+
+    start: datetime | None = None
+    end: datetime | None = None
+
+    start_is_all_day: bool = False
+    end_is_all_day: bool = False
+
+    status: str | None = None
+    html_link: str | None = None
