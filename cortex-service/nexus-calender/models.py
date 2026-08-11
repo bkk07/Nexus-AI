@@ -114,3 +114,22 @@ class EventSummary(BaseModel):
 
     location: str | None = None
     description: str | None = None
+
+class TimeSlot(BaseModel):
+    start: datetime
+    end: datetime
+    duration_minutes: int
+
+class TimeSlot(BaseModel):
+    """
+    Represents a contiguous free period in the calendar.
+
+    This is an application-level representation.
+    It does not contain Google Calendar API data.
+    """
+
+    start: datetime
+    end: datetime
+    duration_minutes: int = Field(
+        gt=0,
+    )

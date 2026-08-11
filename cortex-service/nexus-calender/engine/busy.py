@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 from busy_intervals import (
     BusyInterval,
     events_to_busy_intervals,
