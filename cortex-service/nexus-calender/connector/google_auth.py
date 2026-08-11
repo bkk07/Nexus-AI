@@ -6,12 +6,10 @@ from dotenv import load_dotenv
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 
-
 load_dotenv()
 
-
 CALENDAR_SCOPES = [
-    "https://www.googleapis.com/auth/calendar.readonly"
+    "https://www.googleapis.com/auth/calendar"
 ]
 
 
