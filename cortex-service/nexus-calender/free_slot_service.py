@@ -59,3 +59,4 @@ class FreeSlotService:
             busy_intervals=busy_intervals,
             minimum_duration_minutes=minimum_duration_minutes,
         )
+    
