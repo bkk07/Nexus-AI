@@ -97,3 +97,20 @@ class CalendarEvent(BaseModel):
 
     status: str | None = None
     html_link: str | None = None
+
+
+class EventSummary(BaseModel):
+    """
+    Stable application-level representation of a calendar event.
+
+    The rest of the Calendar system should depend on this model,
+    not on raw Google Calendar API dictionaries.
+    """
+
+    event_id: str
+    title: str
+    start: datetime
+    end: datetime
+
+    location: str | None = None
+    description: str | None = None
