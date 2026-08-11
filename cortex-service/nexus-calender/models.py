@@ -133,3 +133,18 @@ class TimeSlot(BaseModel):
     duration_minutes: int = Field(
         gt=0,
     )
+
+
+class RankedSlot(BaseModel):
+    """
+    A free slot together with its deterministic ranking score.
+
+    The score is calculated entirely by Python.
+    No LLM is involved in ranking.
+    """
+
+    slot: TimeSlot
+    score: float
+    reasons: list[str] = Field(default_factory=list)
+
+
