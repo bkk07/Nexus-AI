@@ -1,0 +1,79 @@
+from __future__ import annotations
+
+from enum import Enum
+
+from pydantic import BaseModel, Field, field_validator
+
+
+class CalendarOperation(str, Enum):
+    SEARCH = "SEARCH"
+    COUNT = "COUNT"
+    FETCH = "FETCH"
+    CHECK_AVAILABILITY = "CHECK_AVAILABILITY"
+    FIND_FREE_SLOTS = "FIND_FREE_SLOTS"
+    FIND_NEXT_FREE_SLOT = "FIND_NEXT_FREE_SLOT"
+    FIND_BEST_SLOT = "FIND_BEST_SLOT"
+
+
+class CalendarRequest(BaseModel):
+    """
+    Semantic representation of a user's Calendar request.
+
+    This model represents user intent.
+    It does NOT represent Google Calendar API parameters.
+    """
+
+    operation: CalendarOperation
+
+    # Search/filter information
+    query: str | None = None
+
+    # Explicit event identification
+    event_id: str | None = None
+
+    # Natural date representation.
+    #
+    # Examples:
+    #   today
+    #   tomorrow
+    #   Friday
+    #   2026-08-15
+    date: str | None = None
+
+    # User-requested time range.
+    #
+    # Examples:
+    #   07:00
+    #   19:00
+    start_time: str | None = None
+    end_time: str | None = None
+
+    # Required duration for availability/scheduling.
+    duration_minutes: int | None = Field(
+        default=None,
+        gt=0,
+    )
+
+    # Why the user wants the slot.
+    #
+    # Example:
+    #   DSA
+    #   project work
+    #   coding
+    purpose: str | None = None
+
+    # User/project timezone.
+    timezone: str = "Asia/Kolkata"
+
+    @field_validator("query", "event_id", "date", "purpose")
+    @classmethod
+    def normalize_optional_strings(
+        cls,
+        value: str | None,
+    ) -> str | None:
+        if value is None:
+            return None
+
+        value = value.strip()
+
+        return value or None
