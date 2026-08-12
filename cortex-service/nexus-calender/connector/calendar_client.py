@@ -36,3 +36,10 @@ class CalendarClient(Protocol):
         event_id: str,
     ) -> EventSummary | None:
         ...
+
+    def update_event(
+        self,
+        event: EventSummary,
+    ) -> EventSummary:
+        ...
+    

@@ -12,6 +12,7 @@ class CalendarOperation(str, Enum):
     FIND_FREE_SLOTS = "FIND_FREE_SLOTS"
     FIND_NEXT_FREE_SLOT = "FIND_NEXT_FREE_SLOT"
     FIND_BEST_SLOT = "FIND_BEST_SLOT"
+    UPDATE = "UPDATE"
 
 
 class CalendarRequest(BaseModel):
@@ -286,3 +287,96 @@ class CalendarFetchRequest(BaseModel):
         value = value.strip()
 
         return value or None
+
+class CalendarUpdateRequest(BaseModel):
+    """
+    Normalized representation of a calendar event update request.
+
+    Exactly one event must be resolved before any update occurs.
+
+    The event can be identified using:
+        - event_id
+        - query
+
+    Only supplied fields are changed.
+    """
+
+    operation: CalendarOperation
+
+    event_id: str | None = None
+    query: str | None = None
+
+    new_title: str | None = None
+    new_start: datetime | None = None
+    new_end: datetime | None = None
+    new_description: str | None = None
+    new_location: str | None = None
+
+    @field_validator(
+        "event_id",
+        "query",
+        "new_title",
+        "new_description",
+        "new_location",
+    )
+    @classmethod
+    def normalize_optional_strings(
+        cls,
+        value: str | None,
+    ) -> str | None:
+
+        if value is None:
+            return None
+
+        value = value.strip()
+
+        return value or None
+
+    @field_validator("new_end")
+    @classmethod
+    def validate_new_end(
+        cls,
+        value: datetime | None,
+        info,
+    ) -> datetime | None:
+
+        if value is None:
+            return None
+
+        new_start = info.data.get("new_start")
+
+        if (
+            new_start is not None
+            and value <= new_start
+        ):
+            raise ValueError(
+                "new_end must be after new_start."
+            )
+
+        return value
+
+class UpdateOutcome(BaseModel):
+    """
+    Result of a safe calendar update attempt.
+    """
+
+    status: Literal[
+        "updated",
+        "not_found",
+        "ambiguous",
+        "conflict_blocked",
+        "invalid",
+    ]
+
+    event: EventSummary | None = None
+
+    candidates: list[EventSummary] = Field(
+        default_factory=list,
+    )
+
+    conflicts: list[EventSummary] = Field(
+        default_factory=list,
+    )
+
+    message: str = ""
+

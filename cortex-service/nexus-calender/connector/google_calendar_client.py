@@ -308,3 +308,43 @@ class GoogleCalendarClient:
                 "Google Calendar event fetch failed.",
                 cause=exc,
             ) from exc
+
+    def update_event(
+        self,
+        event: EventSummary,
+    ) -> EventSummary:
+
+        try:
+
+            response = (
+                self.service
+                .events()
+                .update(
+                    calendarId=self.calendar_id,
+                    eventId=event.event_id,
+                    body={
+                        "summary": event.title,
+                        "description": event.description,
+                        "location": event.location,
+                        "start": {
+                            "dateTime": event.start.isoformat(),
+                        },
+                        "end": {
+                            "dateTime": event.end.isoformat(),
+                        },
+                    },
+                )
+                .execute()
+            )
+
+            return self._normalize_event(
+                response
+            )
+
+        except Exception as exc:
+
+            raise CalendarConnectorError(
+                "Google Calendar update failed.",
+                cause=exc,
+            ) from exc
+    
