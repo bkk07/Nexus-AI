@@ -432,3 +432,22 @@ class DeleteOutcome(BaseModel):
     )
 
     message: str
+
+
+class AvailabilityOutcome(BaseModel):
+    """
+    Result of checking whether a requested time range
+    is available.
+    """
+
+    status: Literal[
+        "available",
+        "conflict",
+        "invalid",
+    ]
+
+    conflicts: list[EventSummary] = Field(
+        default_factory=list,
+    )
+
+    message: str
