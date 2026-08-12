@@ -236,3 +236,53 @@ class CreateOutcome(BaseModel):
     )
 
     message: str
+
+class FetchOutcome(BaseModel):
+    """
+    Result of safely resolving a single calendar event.
+    """
+
+    status: Literal[
+        "found",
+        "not_found",
+        "ambiguous",
+    ]
+
+    event: EventSummary | None = None
+
+    candidates: list[EventSummary] = Field(
+        default_factory=list,
+    )
+class CalendarFetchRequest(BaseModel):
+    """
+    Semantic representation of a request to fetch
+    exactly one calendar event.
+    """
+
+    operation: Literal[
+        CalendarOperation.FETCH
+    ]
+
+    event_id: str | None = None
+
+    query: str | None = None
+
+    date: str | None = None
+
+    @field_validator(
+        "event_id",
+        "query",
+        "date",
+    )
+    @classmethod
+    def normalize_optional_strings(
+        cls,
+        value: str | None,
+    ) -> str | None:
+
+        if value is None:
+            return None
+
+        value = value.strip()
+
+        return value or None

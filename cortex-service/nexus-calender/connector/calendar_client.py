@@ -31,3 +31,8 @@ class CalendarClient(Protocol):
         event_id: str,
     ) -> None:
         ...
+    def get_event(
+        self,
+        event_id: str,
+    ) -> EventSummary | None:
+        ...

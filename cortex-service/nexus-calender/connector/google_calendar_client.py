@@ -262,3 +262,49 @@ class GoogleCalendarClient:
                 "Google Calendar event deletion failed.",
                 cause=exc,
             ) from exc
+
+
+    def get_event(
+        self,
+        event_id: str,
+    ) -> EventSummary | None:
+        """
+        Fetch exactly one Google Calendar event by ID.
+
+        Returns None when the event does not exist.
+        """
+
+        if not event_id or not event_id.strip():
+            raise CalendarConnectorError(
+                "Event ID cannot be empty."
+            )
+
+        try:
+            response = (
+                self.service
+                .events()
+                .get(
+                    calendarId=self.calendar_id,
+                    eventId=event_id,
+                )
+                .execute()
+            )
+
+            return self._normalize_event(response)
+
+        except Exception as exc:
+
+            # Google returns HttpError 404 for a missing event.
+            status_code = getattr(
+                getattr(exc, "resp", None),
+                "status",
+                None,
+            )
+
+            if status_code == 404:
+                return None
+
+            raise CalendarConnectorError(
+                "Google Calendar event fetch failed.",
+                cause=exc,
+            ) from exc
