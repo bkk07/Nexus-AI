@@ -347,4 +347,22 @@ class GoogleCalendarClient:
                 "Google Calendar update failed.",
                 cause=exc,
             ) from exc
-    
+
+    def delete_event(
+        self,
+        event_id: str,
+    ) -> None:
+
+        try:
+
+            self.service.events().delete(
+                calendarId=self.calendar_id,
+                eventId=event_id,
+            ).execute()
+
+        except Exception as exc:
+
+            raise CalendarConnectorError(
+                "Google Calendar event deletion failed.",
+                cause=exc,
+            ) from exc

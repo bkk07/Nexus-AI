@@ -13,6 +13,7 @@ class CalendarOperation(str, Enum):
     FIND_NEXT_FREE_SLOT = "FIND_NEXT_FREE_SLOT"
     FIND_BEST_SLOT = "FIND_BEST_SLOT"
     UPDATE = "UPDATE"
+    DELETE = "DELETE"
 
 
 class CalendarRequest(BaseModel):
@@ -380,3 +381,54 @@ class UpdateOutcome(BaseModel):
 
     message: str = ""
 
+
+class CalendarDeleteRequest(BaseModel):
+    """
+    Normalized representation of a calendar event
+    deletion request.
+
+    The request identifies the event either by:
+    - explicit event_id
+    - natural-language query
+    """
+
+    operation: CalendarOperation
+
+    event_id: str | None = None
+
+    query: str | None = None
+
+    @field_validator("event_id", "query")
+    @classmethod
+    def normalize_optional_strings(
+        cls,
+        value: str | None,
+    ) -> str | None:
+
+        if value is None:
+            return None
+
+        value = value.strip()
+
+        return value or None
+
+
+class DeleteOutcome(BaseModel):
+    """
+    Result of a safe calendar deletion attempt.
+    """
+
+    status: Literal[
+        "deleted",
+        "not_found",
+        "ambiguous",
+        "invalid",
+    ]
+
+    event: EventSummary | None = None
+
+    candidates: list[EventSummary] = Field(
+        default_factory=list,
+    )
+
+    message: str
