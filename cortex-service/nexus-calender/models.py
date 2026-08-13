@@ -451,3 +451,111 @@ class AvailabilityOutcome(BaseModel):
     )
 
     message: str
+
+
+
+class CalendarMultiConstraintRequest(BaseModel):
+    """
+    Semantic representation of a compound scheduling request.
+
+    This model separates hard constraints from soft preferences.
+
+    Hard constraints:
+        - hard_start_time
+        - hard_end_time
+        - deadline
+
+    Soft preferences:
+        - preferred_start_time
+        - preferred_end_time
+
+    Splitting:
+        - split_required
+        - number_of_blocks
+
+    The model represents user intent only.
+    It does not perform scheduling itself.
+    """
+
+    duration_minutes: int = Field(
+        gt=0,
+    )
+
+    # -------------------------------------------------
+    # Hard window constraints
+    # -------------------------------------------------
+
+    hard_start_time: str | None = None
+
+    hard_end_time: str | None = None
+
+    # -------------------------------------------------
+    # Soft preference window
+    # -------------------------------------------------
+
+    preferred_start_time: str | None = None
+
+    preferred_end_time: str | None = None
+
+    # -------------------------------------------------
+    # Deadline
+    # -------------------------------------------------
+
+    deadline: datetime | None = None
+
+    # -------------------------------------------------
+    # Multi-block scheduling
+    # -------------------------------------------------
+
+    split_required: bool = False
+
+    number_of_blocks: int | None = Field(
+        default=None,
+        gt=0,
+    )
+
+    # -------------------------------------------------
+    # Optional purpose
+    # -------------------------------------------------
+
+    purpose: str | None = None
+
+    # -------------------------------------------------
+    # Timezone
+    # -------------------------------------------------
+
+    timezone: str = "Asia/Kolkata"
+
+    @field_validator(
+        "hard_start_time",
+        "hard_end_time",
+        "preferred_start_time",
+        "preferred_end_time",
+        "purpose",
+    )
+    @classmethod
+    def normalize_optional_strings(
+        cls,
+        value: str | None,
+    ) -> str | None:
+
+        if value is None:
+            return None
+
+        value = value.strip()
+
+        return value or None
+
+    @field_validator("number_of_blocks")
+    @classmethod
+    def validate_number_of_blocks(
+        cls,
+        value: int | None,
+    ) -> int | None:
+
+        if value is not None and value < 1:
+            raise ValueError(
+                "number_of_blocks must be positive."
+            )
+
+        return value
